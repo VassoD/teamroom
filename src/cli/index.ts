@@ -4,6 +4,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { ApiClient } from "../client/api-client.js";
 import { saveConfig } from "../client/config.js";
+import { installClaudeHook, parseClaudeEdit, uninstallClaudeHook } from "../client/claude-hook.js";
 import { UsageError, describeError } from "../client/errors.js";
 import { Git } from "../client/git.js";
 import { installHooks, uninstallHooks, type CliLocation } from "../client/hooks.js";
@@ -13,6 +14,7 @@ import {
   formatOverlaps,
   openWorkspace,
   postNote,
+  reportEdit,
   reportWork,
 } from "../client/workspace.js";
 import { runMcpServer } from "../mcp/server.js";
@@ -32,7 +34,7 @@ Setup
   teamroom serve [--port ${DEFAULT_PORT}] [--host ${DEFAULT_HOST}] [--data-dir ${DEFAULT_DATA_DIR}] [--trust-proxy]
   teamroom create --server <url> --room-name <name> --name <you>
   teamroom join --server <url> --room <room id> --invite <code> --name <you>
-  teamroom hooks install | uninstall
+  teamroom hooks install | uninstall [--claude]   --claude also reports each file Claude Code edits
 
 Daily use
   teamroom check [files...]         Who else is touching these files (default: your pending changes)
@@ -108,11 +110,33 @@ const commands: Record<string, Command> = {
   },
 
   hooks: async (args) => {
-    const [action] = args;
+    const { values, positionals } = parseArgs({ args, options: { claude: { type: "boolean", default: false } }, allowPositionals: true });
+    const [action] = positionals;
     if (action !== "install" && action !== "uninstall") throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
-    const hooksDir = await new Git(process.cwd()).hooksDir();
+    const git = new Git(process.cwd());
+    const hooksDir = await git.hooksDir();
     const changes = action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`${hook}: ${change}`);
+    return EXIT_OK;
+    if (values.claude) {
+      const repoRoot = await git.repoRoot();
+      const claude = action === "install" ? await installClaudeHook(repoRoot, await currentCli()) : await uninstallClaudeHook(repoRoot);
+      print(`Claude Code PostToolUse: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
+      if (action === "install" && claude.change === "installed") print("Restart Claude Code sessions in this repo to pick it up.");
+    }
+    return EXIT_OK;
+  },
+
+  // Called by Claude Code after each file edit. Silent and always succeeds: it must never get in Claude's way.
+  "claude-hook": async () => {
+    try {
+      const edit = parseClaudeEdit(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
+      if (!edit) return EXIT_OK;
+      const workspace = await openWorkspace(edit.cwd ?? process.cwd());
+      await reportEdit(workspace, { file: edit.file, agent: "claude-code" });
+    } catch {
+      // Not in a room, server down, or a file outside the repo: nothing to report.
+    }
     return EXIT_OK;
   },
 
@@ -229,6 +253,20 @@ function requireOption(value: string | undefined, flag: string): string {
   if (!value?.trim()) throw new UsageError(`${flag} is required.`);
   return value.trim();
 }
+const CLAUDE_HOOK_STDIN_TIMEOUT_MS = 2_000;
+
+/** Reads all of stdin, giving up after `timeoutMs` so a hook never hangs when nothing is piped in. */
+async function readStdin(timeoutMs: number): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  const chunks: Buffer[] = [];
+  const read = (async () => {
+    for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk as Buffer));
+  })();
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref());
+  await Promise.race([read, timeout]);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 
 function parseOptionalInt(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
