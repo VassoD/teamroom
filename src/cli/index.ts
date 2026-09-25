@@ -2,15 +2,24 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { AGENT_INSTRUCTION, CODEX_SNIPPET, installMcpConfig, mcpConfigHasTeamroom } from "../client/agents.js";
 import { ApiClient } from "../client/api-client.js";
+import { installClaudeHook, parseClaudeEdit, uninstallClaudeHook } from "../client/claude-hook.js";
 import { ENV, saveConfig } from "../client/config.js";
 import { formatDoctor, runDoctor } from "../client/doctor.js";
 import { describeError, UsageError } from "../client/errors.js";
 import { Git } from "../client/git.js";
 import { type CliLocation, installHooks, uninstallHooks } from "../client/hooks.js";
 import { formatInviteLink, normalizeServerUrl, parseInviteLink } from "../client/invite-link.js";
-import { checkOverlap, formatAge, formatOverlaps, openWorkspace, postNote, reportWork } from "../client/workspace.js";
+import { AGENT_INSTRUCTION, CODEX_SNIPPET, installMcpConfig, mcpConfigHasTeamroom } from "../client/mcp-config.js";
+import {
+  checkOverlap,
+  formatAge,
+  formatOverlaps,
+  openWorkspace,
+  postNote,
+  reportEdit,
+  reportWork,
+} from "../client/workspace.js";
 import { MAX_NAME_LENGTH } from "../core/schemas.js";
 import { runMcpServer } from "../mcp/server.js";
 import { DEFAULT_DATA_DIR, DEFAULT_HOST, DEFAULT_PORT, startServer } from "../server/serve.js";
@@ -30,7 +39,7 @@ Setup
   teamroom create --server <url> [--room-name <name>] [--name <you>]
   teamroom join '<invite link>' [--name <you>]
   teamroom agents install           Let Claude Code and Codex use teamroom in this repo
-  teamroom hooks install | uninstall
+  teamroom hooks install | uninstall [--claude]   --claude also reports each file Claude Code edits
   teamroom doctor                   Check the setup and say how to fix what is missing
 
 Daily use
@@ -38,6 +47,7 @@ Daily use
   teamroom report [--note <text>]   Share the files this checkout is changing
   teamroom note <text> [--files a,b]
   teamroom status [--limit ${DEFAULT_STATUS_LIMIT}]
+  teamroom watch [--interval 3]     Live dashboard: teammates, their agents, and what each is doing
   teamroom mcp                      Run the MCP server for coding agents (stdio)
 
 Room admin
@@ -162,13 +172,42 @@ const commands: Record<string, Command> = {
   },
 
   hooks: async (args) => {
-    const [action] = args;
+    const { values, positionals } = parseArgs({
+      args,
+      options: { claude: { type: "boolean", default: false } },
+      allowPositionals: true,
+    });
+    const [action] = positionals;
     if (action !== "install" && action !== "uninstall")
       throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
-    const hooksDir = await new Git(process.cwd()).hooksDir();
+    const git = new Git(process.cwd());
+    const hooksDir = await git.hooksDir();
     const changes =
       action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`${hook}: ${change}`);
+    if (values.claude) {
+      const repoRoot = await git.repoRoot();
+      const claude =
+        action === "install"
+          ? await installClaudeHook(repoRoot, await currentCli())
+          : await uninstallClaudeHook(repoRoot);
+      print(`Claude Code PostToolUse: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
+      if (action === "install" && claude.change === "installed")
+        print("Restart Claude Code sessions in this repo to pick it up.");
+    }
+    return EXIT_OK;
+  },
+
+  // Called by Claude Code after each file edit. Silent and always succeeds: it must never get in Claude's way.
+  "claude-hook": async () => {
+    try {
+      const edit = parseClaudeEdit(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
+      if (!edit) return EXIT_OK;
+      const workspace = await openWorkspace(edit.cwd ?? process.cwd());
+      await reportEdit(workspace, { file: edit.file, agent: "claude-code" });
+    } catch {
+      // Not in a room, server down, or a file outside the repo: nothing to report.
+    }
     return EXIT_OK;
   },
 
@@ -246,6 +285,16 @@ const commands: Record<string, Command> = {
     return EXIT_OK;
   },
 
+  watch: async (args) => {
+    const { values } = parseArgs({ args, options: { interval: { type: "string" } } });
+    const intervalSeconds = parseOptionalInt(values.interval, "--interval");
+    const workspace = await openWorkspace(process.cwd());
+    // Loaded on demand so hooks and scripts never pay for React and Ink.
+    const { runDashboard } = await import("../dashboard/run.js");
+    await runDashboard(workspace, intervalSeconds === undefined ? undefined : intervalSeconds * 1000);
+    return EXIT_OK;
+  },
+
   mcp: async () => {
     await runMcpServer(() => openWorkspace(process.cwd()));
     return EXIT_OK;
@@ -320,6 +369,20 @@ function indent(text: string): string {
 }
 
 /** npx runs from a throwaway cache, so pinning its path would break once the cache is cleared. */
+const CLAUDE_HOOK_STDIN_TIMEOUT_MS = 2_000;
+
+/** Reads all of stdin, giving up after `timeoutMs` so a hook never hangs when nothing is piped in. */
+async function readStdin(timeoutMs: number): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  const chunks: Buffer[] = [];
+  const read = (async () => {
+    for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk as Buffer));
+  })();
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref());
+  await Promise.race([read, timeout]);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function currentCli(): Promise<CliLocation | undefined> {
   const script = process.argv[1];
   if (!script) return undefined;

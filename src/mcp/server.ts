@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 import { describeError } from "../client/errors.js";
 import { checkOverlap, formatAge, formatOverlaps, postNote, reportWork, type Workspace } from "../client/workspace.js";
+import { agentLabel, normalizeAgentId } from "../core/agents.js";
 import { MAX_ACTIVITY_KEPT } from "../core/room.js";
 import { MAX_OVERLAP_WINDOW_HOURS, MAX_TEXT_LENGTH } from "../core/schemas.js";
 
@@ -11,7 +12,7 @@ import { MAX_OVERLAP_WINDOW_HOURS, MAX_TEXT_LENGTH } from "../core/schemas.js";
  * dependency tree are not worth adding.
  */
 
-export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = { name: "teamroom", version: "0.1.0" };
 const DEFAULT_RECENT_LIMIT = 20;
 
@@ -37,12 +38,21 @@ interface ToolResult {
   isError?: boolean;
 }
 
+/** Who is calling, learned from the MCP `initialize` handshake. */
+export interface ClientContext {
+  agent?: string;
+}
+
 interface ToolDefinition<Schema extends z.ZodObject> {
   name: string;
   description: string;
   input: Schema;
-  run: (workspace: Workspace, input: z.output<Schema>) => Promise<string>;
+  run: (workspace: Workspace, input: z.output<Schema>, client: ClientContext) => Promise<string>;
 }
+
+const initializeParamsSchema = z.object({
+  clientInfo: z.object({ name: z.string() }).optional(),
+});
 
 function defineTool<Schema extends z.ZodObject>(tool: ToolDefinition<Schema>): ToolDefinition<z.ZodObject> {
   return tool as unknown as ToolDefinition<z.ZodObject>;
@@ -72,8 +82,12 @@ const TOOLS = [
     input: z.object({
       note: z.string().max(MAX_TEXT_LENGTH).optional().describe("One line on what you are doing and why."),
     }),
-    run: async (workspace, input) => {
-      const { activity, omittedFiles } = await reportWork(workspace, { source: "agent", note: input.note });
+    run: async (workspace, input, client) => {
+      const { activity, omittedFiles } = await reportWork(workspace, {
+        source: "agent",
+        agent: client.agent,
+        note: input.note,
+      });
       const omitted = omittedFiles > 0 ? ` (${omittedFiles} more left out, over the limit)` : "";
       return `Reported ${activity.files.length} file(s)${omitted} as session ${workspace.session}.`;
     },
@@ -87,8 +101,8 @@ const TOOLS = [
       text: z.string().min(1).max(MAX_TEXT_LENGTH),
       files: z.array(z.string()).optional(),
     }),
-    run: async (workspace, input) => {
-      await postNote(workspace, { text: input.text, files: input.files, source: "agent" });
+    run: async (workspace, input, client) => {
+      await postNote(workspace, { text: input.text, files: input.files, source: "agent", agent: client.agent });
       return "Note posted to the room.";
     },
   }),
@@ -105,7 +119,8 @@ const TOOLS = [
         .reverse()
         .map((entry) => {
           const files = entry.files.length > 0 ? ` [${entry.files.length} file(s)]` : "";
-          return `- ${entry.member} (${entry.kind}, ${formatAge(entry.createdAt)}): ${entry.text}${files}`;
+          const via = entry.agent ? ` via ${agentLabel(entry.agent)}` : "";
+          return `- ${entry.member}${via} (${entry.kind}, ${formatAge(entry.createdAt)}): ${entry.text}${files}`;
         })
         .join("\n");
     },
@@ -125,6 +140,7 @@ export interface McpHandler {
  * the problem through a tool result, when the repo has not joined a room yet.
  */
 export function createMcpHandler(getWorkspace: () => Promise<Workspace>): McpHandler {
+  const client: ClientContext = {};
   return {
     async handle(message) {
       let raw: unknown;
@@ -141,12 +157,15 @@ export function createMcpHandler(getWorkspace: () => Promise<Workspace>): McpHan
       if (id === undefined) return undefined;
 
       switch (method) {
-        case "initialize":
+        case "initialize": {
+          const init = initializeParamsSchema.safeParse(params);
+          client.agent = normalizeAgentId(init.success ? init.data.clientInfo?.name : undefined);
           return result(id, {
             protocolVersion: negotiateVersion(params),
             capabilities: { tools: {} },
             serverInfo: SERVER_INFO,
           });
+        }
         case "ping":
           return result(id, {});
         case "tools/list":
@@ -158,7 +177,7 @@ export function createMcpHandler(getWorkspace: () => Promise<Workspace>): McpHan
             })),
           });
         case "tools/call":
-          return callTool(id, params, getWorkspace);
+          return callTool(id, params, getWorkspace, client);
         default:
           return errorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method ${method} is not supported.`);
       }
@@ -169,7 +188,8 @@ export function createMcpHandler(getWorkspace: () => Promise<Workspace>): McpHan
 async function callTool(
   id: string | number,
   params: unknown,
-  getWorkspace: () => Promise<Workspace>
+  getWorkspace: () => Promise<Workspace>,
+  client: ClientContext
 ): Promise<JsonRpcResponse> {
   const call = toolCallParamsSchema.safeParse(params);
   if (!call.success) return errorResponse(id, JSON_RPC_INVALID_PARAMS, "tools/call needs a tool name.");
@@ -184,7 +204,7 @@ async function callTool(
 
   try {
     const workspace = await getWorkspace();
-    const text = await tool.run(workspace, input.data);
+    const text = await tool.run(workspace, input.data, client);
     return result(id, { content: [{ type: "text", text }] } satisfies ToolResult);
   } catch (error) {
     // Tool failures go back to the model as results, so it can tell the user or carry on.

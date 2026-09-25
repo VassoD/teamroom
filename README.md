@@ -62,6 +62,7 @@ teamroom check src/auth.ts        # or specific files; exits 3 when there is ove
 teamroom note "about to rename User" --files src/user.ts,src/db/schema.ts
 teamroom report                   # share your snapshot now (hooks do this on commit, checkout, merge, rebase)
 teamroom status                   # members and recent activity
+teamroom watch                    # live dashboard: who is working, their agents, files in more than one place
 ```
 
 ## Coding agents (MCP)
@@ -82,6 +83,14 @@ teamroom status                   # members and recent activity
 command = "teamroom"
 args = ["mcp"]
 ```
+
+Git hooks only see changes when you commit or switch branches. To share each file Claude Code edits as it happens, run:
+
+```sh
+teamroom hooks install --claude
+```
+
+This adds a `PostToolUse` hook to `.claude/settings.local.json` (local to you, not committed). Activity from agents is labeled with the agent that posted it, such as Claude Code or Codex.
 
 Tell agents to use it, for example in `AGENTS.md` or `CLAUDE.md`:
 

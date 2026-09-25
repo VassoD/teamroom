@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mcpConfigHasTeamroom } from "./agents.js";
 import { ApiClient } from "./api-client.js";
 import { loadConfig } from "./config.js";
 import { describeError } from "./errors.js";
 import { Git } from "./git.js";
 import { HOOK_NAMES, installedHooks } from "./hooks.js";
+import { mcpConfigHasTeamroom } from "./mcp-config.js";
 
 const execFileAsync = promisify(execFile);
 const COMMAND_LOOKUP_TIMEOUT_MS = 2_000;

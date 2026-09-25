@@ -6,12 +6,12 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { type ServerType, serve } from "@hono/node-server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { installMcpConfig } from "../src/client/agents.js";
 import { ApiClient } from "../src/client/api-client.js";
 import { saveConfig } from "../src/client/config.js";
 import { type DoctorCheck, formatDoctor, runDoctor } from "../src/client/doctor.js";
 import { Git } from "../src/client/git.js";
 import { installHooks } from "../src/client/hooks.js";
+import { installMcpConfig } from "../src/client/mcp-config.js";
 import { createApp } from "../src/server/app.js";
 import { MemoryRoomStore } from "../src/store/memory-store.js";
 
