@@ -1,4 +1,5 @@
 import path from "node:path";
+import { agentLabel } from "../core/agents.js";
 import { normalizePath } from "../core/overlap.js";
 import { MAX_FILES_PER_ACTIVITY, MAX_TEXT_LENGTH } from "../core/schemas.js";
 import type { Activity, ActivitySource, FileOverlap } from "../core/types.js";
@@ -41,7 +42,7 @@ export interface ReportResult {
  */
 export async function reportWork(
   workspace: Workspace,
-  options: { source: ActivitySource; note?: string }
+  options: { source: ActivitySource; note?: string; agent?: string }
 ): Promise<ReportResult> {
   const state = await workspace.git.workingState();
   const files = state.files.slice(0, MAX_FILES_PER_ACTIVITY);
@@ -49,6 +50,7 @@ export async function reportWork(
   const activity = await workspace.client.postActivity(workspace.config.roomId, {
     kind: "wip",
     source: options.source,
+    agent: options.agent,
     session: workspace.session,
     text: truncate(options.note?.trim() || describeSnapshot(state.files.length, state.branch)),
     branch: state.branch,
@@ -60,17 +62,41 @@ export async function reportWork(
 
 export async function postNote(
   workspace: Workspace,
-  options: { text: string; files?: string[]; source: ActivitySource }
+  options: { text: string; files?: string[]; source: ActivitySource; agent?: string }
 ): Promise<Activity> {
   const [branch, commit] = await Promise.all([workspace.git.currentBranch(), workspace.git.headCommit()]);
   return workspace.client.postActivity(workspace.config.roomId, {
     kind: "note",
     source: options.source,
+    agent: options.agent,
     session: workspace.session,
     text: truncate(options.text.trim()),
     branch,
     commit,
     files: (options.files ?? []).map((file) => toRepoPath(workspace, file)).slice(0, MAX_FILES_PER_ACTIVITY),
+  });
+}
+
+/**
+ * Records that a coding agent edited one file. Returns null for files outside
+ * the repo (scratch files, other projects), which the team has no reason to see.
+ */
+export async function reportEdit(
+  workspace: Workspace,
+  options: { file: string; agent: string }
+): Promise<Activity | null> {
+  const file = toRepoPath(workspace, options.file);
+  if (file === "" || file.startsWith("../") || path.isAbsolute(file)) return null;
+  const [branch, commit] = await Promise.all([workspace.git.currentBranch(), workspace.git.headCommit()]);
+  return workspace.client.postActivity(workspace.config.roomId, {
+    kind: "edit",
+    source: "agent",
+    agent: options.agent,
+    session: workspace.session,
+    text: truncate(`${agentLabel(options.agent)} edited ${file}`),
+    branch,
+    commit,
+    files: [file],
   });
 }
 
@@ -146,7 +172,8 @@ export function formatOverlaps(overlaps: FileOverlap[]): string {
     .map((overlap) => {
       const touches = overlap.touchedBy.map((touch) => {
         const where = [touch.session, touch.branch].filter(Boolean).join(" on ");
-        return `  - ${touch.member}${where ? ` (${where})` : ""}, ${touch.kind} ${formatAge(touch.at)}: ${touch.text}`;
+        const via = touch.agent ? ` via ${agentLabel(touch.agent)}` : "";
+        return `  - ${touch.member}${via}${where ? ` (${where})` : ""}, ${touch.kind} ${formatAge(touch.at)}: ${touch.text}`;
       });
       return [overlap.file, ...touches].join("\n");
     })
