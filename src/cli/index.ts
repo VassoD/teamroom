@@ -41,6 +41,7 @@ Daily use
   teamroom report [--note <text>]   Share the files this checkout is changing
   teamroom note <text> [--files a,b]
   teamroom status [--limit ${DEFAULT_STATUS_LIMIT}]
+  teamroom watch [--interval 3]     Live dashboard: teammates, their agents, and what each is doing
   teamroom mcp                      Run the MCP server for coding agents (stdio)
 
 Room admin
@@ -117,7 +118,6 @@ const commands: Record<string, Command> = {
     const hooksDir = await git.hooksDir();
     const changes = action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`${hook}: ${change}`);
-    return EXIT_OK;
     if (values.claude) {
       const repoRoot = await git.repoRoot();
       const claude = action === "install" ? await installClaudeHook(repoRoot, await currentCli()) : await uninstallClaudeHook(repoRoot);
@@ -205,6 +205,16 @@ const commands: Record<string, Command> = {
     return EXIT_OK;
   },
 
+  watch: async (args) => {
+    const { values } = parseArgs({ args, options: { interval: { type: "string" } } });
+    const intervalSeconds = parseOptionalInt(values.interval, "--interval");
+    const workspace = await openWorkspace(process.cwd());
+    // Loaded on demand so hooks and scripts never pay for React and Ink.
+    const { runDashboard } = await import("../dashboard/run.js");
+    await runDashboard(workspace, intervalSeconds === undefined ? undefined : intervalSeconds * 1000);
+    return EXIT_OK;
+  },
+
   mcp: async () => {
     await runMcpServer(() => openWorkspace(process.cwd()));
     return EXIT_OK;
@@ -242,17 +252,6 @@ const commands: Record<string, Command> = {
 };
 
 /** npx runs from a throwaway cache, so pinning its path would break once the cache is cleared. */
-async function currentCli(): Promise<CliLocation | undefined> {
-  const script = process.argv[1];
-  if (!script) return undefined;
-  const resolved = await fs.realpath(script);
-  return resolved.includes(`${path.sep}_npx${path.sep}`) ? undefined : { node: process.execPath, script: resolved };
-}
-
-function requireOption(value: string | undefined, flag: string): string {
-  if (!value?.trim()) throw new UsageError(`${flag} is required.`);
-  return value.trim();
-}
 const CLAUDE_HOOK_STDIN_TIMEOUT_MS = 2_000;
 
 /** Reads all of stdin, giving up after `timeoutMs` so a hook never hangs when nothing is piped in. */
@@ -267,6 +266,17 @@ async function readStdin(timeoutMs: number): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+async function currentCli(): Promise<CliLocation | undefined> {
+  const script = process.argv[1];
+  if (!script) return undefined;
+  const resolved = await fs.realpath(script);
+  return resolved.includes(`${path.sep}_npx${path.sep}`) ? undefined : { node: process.execPath, script: resolved };
+}
+
+function requireOption(value: string | undefined, flag: string): string {
+  if (!value?.trim()) throw new UsageError(`${flag} is required.`);
+  return value.trim();
+}
 
 function parseOptionalInt(value: string | undefined, flag: string): number | undefined {
   if (value === undefined) return undefined;
