@@ -1,0 +1,52 @@
+{
+  "name": "teamroom",
+  "version": "0.1.0",
+  "description": "Know what your teammates (and their coding agents) are touching before the merge conflict does.",
+  "license": "MIT",
+  "author": "Vasiliki Doropoulou",
+  "type": "module",
+  "bin": {
+    "teamroom": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "git",
+    "git-hooks",
+    "mcp",
+    "model-context-protocol",
+    "codex",
+    "claude-code",
+    "coding-agents",
+    "collaboration"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "serve": "node dist/cli/index.js serve",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.9",
+    "ink": "6.8.0",
+    "react": "19.2.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "@types/react": "19.2.2",
+    "ink-testing-library": "4.0.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.2"
+  }
+}
