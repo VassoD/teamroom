@@ -66,6 +66,10 @@ export class Git {
     return path.resolve(this.cwd, dir);
   }
 
+  async userName(): Promise<string | undefined> {
+    return (await this.optional(["config", "user.name"])) || undefined;
+  }
+
   async currentBranch(): Promise<string | undefined> {
     const branch = await this.optional(["symbolic-ref", "--quiet", "--short", "HEAD"]);
     return branch || undefined;
@@ -139,7 +143,10 @@ export class Git {
  */
 export function sessionForRepoRoot(repoRoot: string): string {
   const readable =
-    path.basename(repoRoot).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, SESSION_PREFIX_MAX_LENGTH) || "repo";
+    path
+      .basename(repoRoot)
+      .replace(/[^A-Za-z0-9._-]/g, "-")
+      .slice(0, SESSION_PREFIX_MAX_LENGTH) || "repo";
   const suffix = createHash("sha256").update(repoRoot).digest("hex").slice(0, SESSION_HASH_LENGTH);
   return `${readable}-${suffix}`;
 }

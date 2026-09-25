@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { Hono, type Context } from "hono";
+import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
 import { findOverlaps } from "../core/overlap.js";
 import {
-  MAX_ACTIVITY_KEPT,
-  MAX_MEMBERS,
   addMember,
   appendActivity,
   createRoom,
   findMemberByToken,
   inviteCodeIsValid,
+  MAX_ACTIVITY_KEPT,
+  MAX_MEMBERS,
   removeMember,
   rotateInvite,
   rotateMemberToken,
@@ -25,8 +25,8 @@ import {
   roomIdSchema,
 } from "../core/schemas.js";
 import type { Member, Room } from "../core/types.js";
-import { RoomNotFoundError, StoreLockTimeoutError, type RoomStore } from "../store/store.js";
-import { silentLogger, type Logger } from "./logger.js";
+import { RoomNotFoundError, type RoomStore, StoreLockTimeoutError } from "../store/store.js";
+import { type Logger, silentLogger } from "./logger.js";
 import { RateLimiter, type RateLimitRule } from "./rate-limit.js";
 
 const DEFAULT_ACTIVITY_LIMIT = 50;
@@ -134,6 +134,22 @@ export function createApp({
 
   app.get("/health", (context) => context.json({ data: { status: "ok" } }));
 
+  // Invite links point here. The invite code is in the URL fragment, which
+  // browsers never send, so this page cannot and does not reveal anything.
+  app.get("/join/:roomId", (context) =>
+    context.text(
+      [
+        "You were invited to a teamroom.",
+        "",
+        "In the git repo you work on, run:",
+        "",
+        "  npx teamroom join '<paste the full invite link here>'",
+        "",
+        "Paste the whole link, including the part after #.",
+      ].join("\n")
+    )
+  );
+
   app.post("/v1/rooms", async (context) => {
     enforceRateLimit(createLimiter, `create:${getClientAddress(context)}`);
     const input = await parseBody(context, createRoomRequestSchema);
@@ -164,7 +180,10 @@ export function createApp({
       return joined.room;
     });
 
-    return context.json({ data: { room: toRoomView(room, DEFAULT_ACTIVITY_LIMIT), me: input.name, token: issuedToken } }, 201);
+    return context.json(
+      { data: { room: toRoomView(room, DEFAULT_ACTIVITY_LIMIT), me: input.name, token: issuedToken } },
+      201
+    );
   });
 
   app.get("/v1/rooms/:roomId", async (context) => {

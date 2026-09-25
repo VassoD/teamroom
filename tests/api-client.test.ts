@@ -29,7 +29,7 @@ describe("ApiClient", () => {
     expect(result.me).toBe("ada");
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(url).toBe(`http://teamroom.test/v1/rooms/${ROOM_ID}?limit=5`);
-    expect((init?.headers as Record<string, string>).authorization).toBe("Bearer trm_test");
+    expect((init?.headers as Record<string, string> | undefined)?.authorization).toBe("Bearer trm_test");
   });
 
   it("should turn an error envelope into an ApiError", async () => {

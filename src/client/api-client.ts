@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { activitySchema, fileOverlapSchema, roomViewSchema, type PostActivityRequest } from "../core/schemas.js";
+import { activitySchema, fileOverlapSchema, type PostActivityRequest, roomViewSchema } from "../core/schemas.js";
 import type { Activity, FileOverlap, RoomView } from "../core/types.js";
 import { ApiError, NetworkError } from "./errors.js";
 
@@ -13,6 +13,8 @@ const errorEnvelopeSchema = z.object({
 });
 
 const successEnvelopeSchema = z.object({ data: z.unknown() });
+
+const healthResponseSchema = z.object({ status: z.literal("ok") });
 
 const createdRoomSchema = z.object({ room: roomViewSchema, me: z.string(), inviteCode: z.string(), token: z.string() });
 const joinedRoomSchema = z.object({ room: roomViewSchema, me: z.string(), token: z.string() });
@@ -54,6 +56,10 @@ export class ApiClient {
     this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.sleep = options.sleep ?? defaultSleep;
+  }
+
+  async health(): Promise<void> {
+    await this.request({ method: "GET", path: "/health", schema: healthResponseSchema, retry: false });
   }
 
   async createRoom(name: string, member: string): Promise<z.infer<typeof createdRoomSchema>> {

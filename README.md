@@ -15,7 +15,7 @@ Pushed branches are only part of the picture. Teamroom also sees work that is st
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 22 or newer (24 LTS recommended)
 - git
 
 ## Setup
@@ -32,18 +32,27 @@ In your repo, one person creates the room:
 
 ```sh
 npm install --global teamroom
-teamroom create --server https://teamroom.example.com --room-name "Core app" --name ada
-teamroom hooks install
+teamroom create --server https://teamroom.example.com
+git add .mcp.json && git commit -m "chore: add teamroom for coding agents"
 ```
 
-`create` prints a `teamroom join ...` command. Anyone who has it can join, so share it privately:
+`create` names the room after the repo folder and you after your git `user.name` (override with `--room-name` and `--name`). It also installs the git hooks and writes `.mcp.json` so Claude Code picks up the tools. It prints an invite link:
+
+```
+https://teamroom.example.com/join/room_...#tri_...
+```
+
+Anyone who has the link can join, so share it privately. Teammates run, inside their clone:
 
 ```sh
-teamroom join --server https://teamroom.example.com --room room_... --invite tri_... --name bo
-teamroom hooks install
+teamroom join 'https://teamroom.example.com/join/room_...#tri_...'
 ```
 
-Membership is saved to `.git/teamroom.json` (mode `600`, never committed). Every worktree of the repo shares it.
+That's it. If something doesn't work, `teamroom doctor` checks every piece (repo, hooks, agent config, server, token) and prints the command that fixes each problem.
+
+Membership is saved to `.git/teamroom.json` (mode `600`, never committed). Every worktree of the repo shares it. The invite code sits after the `#`, which browsers never send, so it stays out of server logs even if someone opens the link.
+
+To try it alone first, run `teamroom serve` in one terminal and `teamroom create --server localhost:8787` in your repo.
 
 ## Daily use
 
@@ -66,33 +75,12 @@ teamroom status                   # members and recent activity
 | `teamroom_post_note` | Announce an intent before acting on it |
 | `teamroom_recent_activity` | Recent activity in the room |
 
-Claude Code:
-
-```sh
-claude mcp add teamroom -- teamroom mcp
-```
-
-Codex (`~/.codex/config.toml`):
+`teamroom create` (or `teamroom agents install`) adds the server to `.mcp.json`, which Claude Code reads for the whole team. For Codex, add this to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.teamroom]
 command = "teamroom"
 args = ["mcp"]
-```
-
-Git hooks only fire on commits and checkouts, so an agent's uncommitted edits are invisible until then. To share them as they happen in Claude Code, add a hook to `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [{ "type": "command", "command": "teamroom report --source agent --quiet" }]
-      }
-    ]
-  }
-}
 ```
 
 Tell agents to use it, for example in `AGENTS.md` or `CLAUDE.md`:
@@ -123,12 +111,18 @@ teamroom token rotate             # replace your own token, for example after a 
 
 ## Development
 
+Requires Node 22+ (`nvm use` picks the version in `.nvmrc`).
+
 ```sh
 npm install
-npm run typecheck
-npm test
-npm run build
+npm run dev        # rebuild on change and restart a local server on :8787
+npm run check      # typecheck, lint and tests, the same as CI
+npm run format     # fix formatting and import order
 ```
+
+Other scripts: `build`, `typecheck`, `lint`, `test`, `test:watch`. CI runs `check` and `build` on Node 22 and 24 for every pull request.
+
+Tooling: TypeScript 7 for type checking and builds, Vitest for tests, and Biome for linting and formatting (one dependency instead of ESLint plus Prettier).
 
 ## License
 

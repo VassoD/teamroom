@@ -2,19 +2,16 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { AGENT_INSTRUCTION, CODEX_SNIPPET, installMcpConfig, mcpConfigHasTeamroom } from "../client/agents.js";
 import { ApiClient } from "../client/api-client.js";
-import { saveConfig } from "../client/config.js";
-import { UsageError, describeError } from "../client/errors.js";
+import { ENV, saveConfig } from "../client/config.js";
+import { formatDoctor, runDoctor } from "../client/doctor.js";
+import { describeError, UsageError } from "../client/errors.js";
 import { Git } from "../client/git.js";
-import { installHooks, uninstallHooks, type CliLocation } from "../client/hooks.js";
-import {
-  checkOverlap,
-  formatAge,
-  formatOverlaps,
-  openWorkspace,
-  postNote,
-  reportWork,
-} from "../client/workspace.js";
+import { type CliLocation, installHooks, uninstallHooks } from "../client/hooks.js";
+import { formatInviteLink, normalizeServerUrl, parseInviteLink } from "../client/invite-link.js";
+import { checkOverlap, formatAge, formatOverlaps, openWorkspace, postNote, reportWork } from "../client/workspace.js";
+import { MAX_NAME_LENGTH } from "../core/schemas.js";
 import { runMcpServer } from "../mcp/server.js";
 import { DEFAULT_DATA_DIR, DEFAULT_HOST, DEFAULT_PORT, startServer } from "../server/serve.js";
 
@@ -30,9 +27,11 @@ const HELP = `teamroom: know what your teammates (and their agents) are touching
 
 Setup
   teamroom serve [--port ${DEFAULT_PORT}] [--host ${DEFAULT_HOST}] [--data-dir ${DEFAULT_DATA_DIR}] [--trust-proxy]
-  teamroom create --server <url> --room-name <name> --name <you>
-  teamroom join --server <url> --room <room id> --invite <code> --name <you>
+  teamroom create --server <url> [--room-name <name>] [--name <you>]
+  teamroom join '<invite link>' [--name <you>]
+  teamroom agents install           Let Claude Code and Codex use teamroom in this repo
   teamroom hooks install | uninstall
+  teamroom doctor                   Check the setup and say how to fix what is missing
 
 Daily use
   teamroom check [files...]         Who else is touching these files (default: your pending changes)
@@ -46,6 +45,9 @@ Room admin
   teamroom member remove <name>     Owner only, or yourself
   teamroom token rotate             Replace your token, for example after a leak
 
+Names default to your git user.name, the room name to the repo folder. create and join
+install the git hooks unless you pass --skip-hooks.
+
 Environment: TEAMROOM_SERVER, TEAMROOM_ROOM, TEAMROOM_MEMBER, TEAMROOM_TOKEN override the
 repo config. TEAMROOM_SESSION names this checkout (default: derived from its path).`;
 
@@ -53,12 +55,15 @@ type Command = (args: string[]) => Promise<number>;
 
 const commands: Record<string, Command> = {
   serve: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      port: { type: "string", default: String(DEFAULT_PORT) },
-      host: { type: "string", default: DEFAULT_HOST },
-      "data-dir": { type: "string", default: DEFAULT_DATA_DIR },
-      "trust-proxy": { type: "boolean", default: false },
-    } });
+    const { values } = parseArgs({
+      args,
+      options: {
+        port: { type: "string", default: String(DEFAULT_PORT) },
+        host: { type: "string", default: DEFAULT_HOST },
+        "data-dir": { type: "string", default: DEFAULT_DATA_DIR },
+        "trust-proxy": { type: "boolean", default: false },
+      },
+    });
     const port = Number(values.port);
     if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new UsageError("--port must be 1 to 65535.");
     startServer({ port, host: values.host, dataDir: values["data-dir"], trustProxy: values["trust-proxy"] });
@@ -68,56 +73,111 @@ const commands: Record<string, Command> = {
   },
 
   create: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      server: { type: "string" },
-      "room-name": { type: "string" },
-      name: { type: "string" },
-    } });
-    const server = requireOption(values.server, "--server");
-    const roomName = requireOption(values["room-name"], "--room-name");
-    const name = requireOption(values.name, "--name");
-    const commonDir = await new Git(process.cwd()).commonDir();
+    const { values } = parseArgs({
+      args,
+      options: {
+        server: { type: "string" },
+        "room-name": { type: "string" },
+        name: { type: "string" },
+        "skip-hooks": { type: "boolean", default: false },
+        "skip-agents": { type: "boolean", default: false },
+      },
+    });
+    const serverInput = values.server ?? process.env[ENV.server];
+    if (!serverInput) {
+      throw new UsageError(
+        `--server is required. To try teamroom locally, run \`teamroom serve\` in another terminal and pass --server http://${DEFAULT_HOST}:${DEFAULT_PORT}.`
+      );
+    }
+    const server = normalizeServerUrl(serverInput);
+    const git = new Git(process.cwd());
+    const [repoRoot, commonDir] = await Promise.all([git.repoRoot(), git.commonDir()]);
+    const name = await memberName(values.name, git);
+    const roomName = values["room-name"]?.trim() || path.basename(repoRoot);
 
     const created = await new ApiClient({ server }).createRoom(roomName, name);
-    const file = await saveConfig(commonDir, { server, roomId: created.room.id, member: created.me, token: created.token });
-    print(`Created room "${created.room.name}" and saved your membership to ${file}.`);
-    print("\nShare this with teammates (it lets anyone who has it join):");
-    print(`  teamroom join --server ${server} --room ${created.room.id} --invite ${created.inviteCode} --name <their name>`);
-    print("\nNext: `teamroom hooks install` so your commits and checkouts are reported automatically.");
+    await saveConfig(commonDir, { server, roomId: created.room.id, member: created.me, token: created.token });
+    print(`Created room "${created.room.name}". You are ${created.me}, the owner.`);
+    await finishSetup(git, repoRoot, { hooks: !values["skip-hooks"], agents: !values["skip-agents"] });
+
+    const link = formatInviteLink({ server, roomId: created.room.id, inviteCode: created.inviteCode });
+    print("\nInvite teammates with this link. Anyone who has it can join, so share it privately:");
+    print(`  ${link}`);
+    print("\nThey run, inside their clone of this repo:");
+    print(`  teamroom join '${link}'`);
     return EXIT_OK;
   },
 
   join: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      server: { type: "string" },
-      room: { type: "string" },
-      invite: { type: "string" },
-      name: { type: "string" },
-    } });
-    const server = requireOption(values.server, "--server");
-    const roomId = requireOption(values.room, "--room");
-    const invite = requireOption(values.invite, "--invite");
-    const name = requireOption(values.name, "--name");
-    const commonDir = await new Git(process.cwd()).commonDir();
+    const { values, positionals } = parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        server: { type: "string" },
+        room: { type: "string" },
+        invite: { type: "string" },
+        name: { type: "string" },
+        "skip-hooks": { type: "boolean", default: false },
+      },
+    });
+    const [link] = positionals;
+    const invite = link
+      ? parseInviteLink(link)
+      : {
+          server: normalizeServerUrl(requireOption(values.server, "--server (or pass the invite link)")),
+          roomId: requireOption(values.room, "--room"),
+          inviteCode: requireOption(values.invite, "--invite"),
+        };
+    const git = new Git(process.cwd());
+    const [repoRoot, commonDir] = await Promise.all([git.repoRoot(), git.commonDir()]);
+    const name = await memberName(values.name, git);
 
-    const joined = await new ApiClient({ server }).joinRoom(roomId, name, invite);
-    const file = await saveConfig(commonDir, { server, roomId: joined.room.id, member: joined.me, token: joined.token });
-    print(`Joined "${joined.room.name}" as ${joined.me}. Membership saved to ${file}.`);
-    print("Next: `teamroom hooks install` so your commits and checkouts are reported automatically.");
+    const joined = await new ApiClient({ server: invite.server }).joinRoom(invite.roomId, name, invite.inviteCode);
+    await saveConfig(commonDir, {
+      server: invite.server,
+      roomId: joined.room.id,
+      member: joined.me,
+      token: joined.token,
+    });
+    print(`Joined "${joined.room.name}" as ${joined.me}.`);
+    // .mcp.json is committed by whoever created the room, so joiners normally get it with the repo.
+    await finishSetup(git, repoRoot, { hooks: !values["skip-hooks"], agents: false });
+    if (!(await mcpConfigHasTeamroom(repoRoot).catch(() => false))) {
+      print("Tip: `teamroom agents install` lets Claude Code and Codex check overlap before they edit.");
+    }
     return EXIT_OK;
+  },
+
+  agents: async (args) => {
+    if (args[0] !== "install") throw new UsageError("Use `teamroom agents install`.");
+    const repoRoot = await new Git(process.cwd()).repoRoot();
+    await setUpAgents(repoRoot);
+    return EXIT_OK;
+  },
+
+  doctor: async () => {
+    const checks = await runDoctor(process.cwd());
+    print(formatDoctor(checks));
+    return checks.some((check) => check.status === "fail") ? EXIT_FAILURE : EXIT_OK;
   },
 
   hooks: async (args) => {
     const [action] = args;
-    if (action !== "install" && action !== "uninstall") throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
+    if (action !== "install" && action !== "uninstall")
+      throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
     const hooksDir = await new Git(process.cwd()).hooksDir();
-    const changes = action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
+    const changes =
+      action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`${hook}: ${change}`);
     return EXIT_OK;
   },
 
   check: async (args) => {
-    const { values, positionals } = parseArgs({ args, options: { "since-hours": { type: "string" } }, allowPositionals: true });
+    const { values, positionals } = parseArgs({
+      args,
+      options: { "since-hours": { type: "string" } },
+      allowPositionals: true,
+    });
     const workspace = await openWorkspace(process.cwd());
     const check = await checkOverlap(workspace, {
       files: positionals,
@@ -132,11 +192,14 @@ const commands: Record<string, Command> = {
   },
 
   report: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      note: { type: "string" },
-      source: { type: "string", default: "human" },
-      quiet: { type: "boolean", default: false },
-    } });
+    const { values } = parseArgs({
+      args,
+      options: {
+        note: { type: "string" },
+        source: { type: "string", default: "human" },
+        quiet: { type: "boolean", default: false },
+      },
+    });
     const source = ACTIVITY_SOURCES.find((candidate) => candidate === values.source);
     if (!source) throw new UsageError(`--source must be one of ${ACTIVITY_SOURCES.join(", ")}.`);
     const workspace = await openWorkspace(process.cwd());
@@ -168,7 +231,9 @@ const commands: Record<string, Command> = {
     const workspace = await openWorkspace(process.cwd());
     const { room, me } = await workspace.client.getRoom(workspace.config.roomId, limit);
     print(`${room.name} (${room.id}), you are ${me}, session ${workspace.session}`);
-    print(`Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`);
+    print(
+      `Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`
+    );
     if (room.activity.length === 0) {
       print("\nNo activity yet.");
       return EXIT_OK;
@@ -190,10 +255,9 @@ const commands: Record<string, Command> = {
     if (args[0] !== "rotate") throw new UsageError("Use `teamroom invite rotate`.");
     const workspace = await openWorkspace(process.cwd());
     const inviteCode = await workspace.client.rotateInvite(workspace.config.roomId);
-    print("The old invite code no longer works. New join command:");
-    print(
-      `  teamroom join --server ${workspace.config.server} --room ${workspace.config.roomId} --invite ${inviteCode} --name <their name>`
-    );
+    const link = formatInviteLink({ server: workspace.config.server, roomId: workspace.config.roomId, inviteCode });
+    print("The old invite link no longer works. New one:");
+    print(`  ${link}`);
     return EXIT_OK;
   },
 
@@ -216,6 +280,44 @@ const commands: Record<string, Command> = {
     return EXIT_OK;
   },
 };
+
+async function finishSetup(git: Git, repoRoot: string, steps: { hooks: boolean; agents: boolean }): Promise<void> {
+  if (steps.hooks) {
+    await installHooks(await git.hooksDir(), await currentCli());
+    print("Installed git hooks: commits, checkouts, merges and rebases are now shared automatically.");
+  }
+  if (steps.agents) await setUpAgents(repoRoot);
+}
+
+async function setUpAgents(repoRoot: string): Promise<void> {
+  const { file, change } = await installMcpConfig(repoRoot);
+  const relative = path.relative(process.cwd(), file) || file;
+  if (change === "unchanged") {
+    print(`${relative} already lists the teamroom MCP server.`);
+  } else {
+    const verb = change === "created" ? "Created" : "Updated";
+    print(`${verb} ${relative} for Claude Code. Commit it so teammates get it too.`);
+  }
+  print("\nCodex: add this to ~/.codex/config.toml");
+  print(indent(CODEX_SNIPPET));
+  print("\nTell your agents to use it, in AGENTS.md or CLAUDE.md:");
+  print(indent(AGENT_INSTRUCTION));
+}
+
+/** Falls back to git's user.name, so most people never type --name. */
+async function memberName(explicit: string | undefined, git: Git): Promise<string> {
+  const fromGit = (await git.userName())?.replace(/@/g, "").trim().slice(0, MAX_NAME_LENGTH);
+  const candidate = explicit?.trim() || fromGit;
+  if (!candidate) throw new UsageError("--name is required (git has no user.name set).");
+  return candidate;
+}
+
+function indent(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => `  ${line}`)
+    .join("\n");
+}
 
 /** npx runs from a throwaway cache, so pinning its path would break once the cache is cleared. */
 async function currentCli(): Promise<CliLocation | undefined> {
