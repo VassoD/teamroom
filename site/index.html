@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>teamroom</title>
+<meta name="description" content="Know what your teammates and their coding agents are touching before the merge conflict does.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #EDF0F3;
+    --surface: #FFFFFF;
+    --ink: #16233A;
+    --muted: #56657A;
+    --rule: #CBD3DD;
+    --alice: #1F8A7A;
+    --agent: #5B4BD6;
+    --overlap: #F4C84A;
+    --overlap-ink: #5A4300;
+    --term: #16233A;
+    --term-text: #DCE4EE;
+    --term-dim: #8494AA;
+    --radius-panel: 10px;
+    --radius-chip: 4px;
+    --measure: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #121A28;
+      --surface: #1A2436;
+      --ink: #E6ECF3;
+      --muted: #9AA8BB;
+      --rule: #2C3A50;
+      --alice: #3DBFA9;
+      --agent: #9489F2;
+      --overlap: #F4C84A;
+      --overlap-ink: #2A1F00;
+      --term: #0C1320;
+      --term-text: #DCE4EE;
+      --term-dim: #71829A;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 17px/1.55 "Schibsted Grotesk", system-ui, sans-serif;
+  }
+  a { color: inherit; text-underline-offset: 3px; }
+  :focus-visible { outline: 3px solid var(--agent); outline-offset: 3px; border-radius: 2px; }
+  code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  code { font-size: 0.88em; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-chip); padding: 0.05em 0.35em; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+  /* Header */
+  .top { display: flex; justify-content: space-between; align-items: center; padding: 22px 0; }
+  .brand { font-weight: 800; font-size: 20px; letter-spacing: -0.02em; text-decoration: none; }
+  .brand span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--overlap); margin-right: 8px; vertical-align: 1px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--overlap) 35%, transparent); }
+  .top nav a { margin-left: 20px; color: var(--muted); text-decoration: none; font-weight: 500; }
+  .top nav a:hover { color: var(--ink); }
+  @media (max-width: 600px) { .top nav a:not(:last-child) { display: none; } }
+
+  /* Hero */
+  .hero { padding: 48px 0 28px; }
+  .hero h1 {
+    font-size: clamp(40px, 7.4vw, 88px);
+    line-height: 0.98;
+    letter-spacing: -0.045em;
+    font-weight: 800;
+    margin: 0 0 22px;
+    max-width: 13ch;
+  }
+  .hero h1 mark {
+    background: none;
+    color: inherit;
+    background-image: linear-gradient(var(--overlap), var(--overlap));
+    background-repeat: no-repeat;
+    background-size: 100% 0.32em;
+    background-position: 0 88%;
+  }
+  .hero p { font-size: 20px; color: var(--muted); max-width: 46ch; margin: 0; }
+
+  /* Replay */
+  .replay { margin: 40px 0 16px; }
+  .panes {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+  @media (max-width: 900px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+  .pane { background: var(--term); color: var(--term-text); border-radius: var(--radius-panel); overflow: hidden; display: flex; flex-direction: column; min-height: 300px; }
+  .pane header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid color-mix(in srgb, var(--term-text) 12%, transparent); font-weight: 700; font-size: 15px; }
+  .pane header small { font-weight: 400; color: var(--term-dim); font-size: 13px; }
+  .who { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .who.alice { background: var(--alice); }
+  .who.agent { background: var(--agent); }
+  .who.room { background: var(--overlap); }
+  .pane .body { padding: 12px 14px 16px; font: 400 13.5px/1.6 "JetBrains Mono", monospace; white-space: pre-wrap; word-break: break-word; flex: 1; }
+  .pane.room { background: var(--surface); color: var(--ink); border: 1px solid var(--rule); }
+  .pane.room header { border-bottom-color: var(--rule); }
+  .pane.room header small { color: var(--muted); }
+  .line { display: block; }
+  .line.dim { color: var(--term-dim); }
+  .line.cmd::before { content: "$ "; color: var(--term-dim); }
+  .line.tool { color: #B7AEFF; }
+  .line.say { font-family: "Schibsted Grotesk", sans-serif; font-size: 15px; line-height: 1.45; margin: 4px 0; }
+  .line.warn { background: var(--overlap); color: var(--overlap-ink); border-radius: var(--radius-chip); padding: 2px 6px; margin: 4px 0; }
+  .feed-item { display: block; border-left: 3px solid var(--rule); padding: 6px 0 6px 10px; margin: 0 0 10px; font-family: "Schibsted Grotesk", sans-serif; font-size: 14.5px; line-height: 1.4; white-space: normal; }
+  .feed-item b { font-weight: 700; }
+  .feed-item .meta { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .feed-item.alice { border-left-color: var(--alice); }
+  .feed-item.agent { border-left-color: var(--agent); }
+  .feed-item.gone { opacity: 0.45; text-decoration: line-through; text-decoration-color: var(--muted); }
+  .file-chip { overflow-wrap: anywhere; font-family: "JetBrains Mono", monospace; font-size: 12.5px; background: var(--paper); border: 1px solid var(--rule); border-radius: var(--radius-chip); padding: 0 5px; }
+  .file-chip.hot { background: var(--overlap); border-color: var(--overlap); color: var(--overlap-ink); }
+  .empty { color: var(--muted); font-family: "Schibsted Grotesk", sans-serif; font-size: 14.5px; }
+  .pane .body .empty { color: var(--term-dim); }
+  .pane.room .body .empty { color: var(--muted); }
+
+  .enter { animation: enter 380ms cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .enter { animation: none; } }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 18px; }
+  .controls button {
+    font: 700 16px "Schibsted Grotesk", sans-serif;
+    border-radius: 999px; padding: 10px 20px; cursor: pointer;
+    border: 2px solid var(--ink); background: var(--ink); color: var(--paper);
+  }
+  .controls button.secondary { background: transparent; color: var(--ink); }
+  .controls button:disabled { opacity: 0.35; cursor: default; }
+  .caption { flex: 1 1 320px; min-height: 3em; margin: 0; font-size: 17px; }
+  .caption strong { display: block; font-size: 13px; color: var(--muted); font-weight: 500; }
+  .progress { display: flex; gap: 6px; }
+  .progress i { width: 26px; height: 5px; border-radius: 3px; background: var(--rule); }
+  .progress i.on { background: var(--ink); }
+
+  /* Sections */
+  section.block { padding: 72px 0 8px; }
+  section.block h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 14px; font-weight: 800; max-width: 22ch; }
+  section.block > .wrap > p { max-width: var(--measure); color: var(--muted); margin: 0 0 28px; }
+
+  .nets { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 2px solid var(--ink); }
+  @media (max-width: 760px) { .nets { grid-template-columns: 1fr; } }
+  .net { padding: 22px 28px 26px 0; }
+  .net + .net { padding-left: 28px; border-left: 1px solid var(--rule); }
+  @media (max-width: 760px) { .net + .net { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); } }
+  .net h3 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
+  .net .verdict { font-weight: 700; margin: 0 0 12px; }
+  .net.hook .verdict { color: var(--alice); }
+  .net.mcp .verdict { color: var(--agent); }
+  .net ul { margin: 0; padding-left: 1.1em; color: var(--muted); }
+  .net li { margin: 6px 0; }
+  .pullquote { font-size: clamp(22px, 3vw, 30px); letter-spacing: -0.02em; font-weight: 500; line-height: 1.25; margin: 34px 0 0; max-width: 30ch; }
+
+  .diagram { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel); padding: 20px; }
+  .diagram svg { width: 100%; height: auto; display: block; }
+  .diagram text { font-family: "Schibsted Grotesk", sans-serif; fill: var(--ink); }
+  .diagram .sub { fill: var(--muted); font-size: 13px; }
+  .diagram .mono-t { font-family: "JetBrains Mono", monospace; font-size: 12.5px; fill: var(--muted); }
+  .diagram .box { fill: var(--paper); stroke: var(--rule); stroke-width: 1.5; }
+  .diagram .room-box { fill: color-mix(in srgb, var(--overlap) 22%, var(--surface)); stroke: var(--overlap); stroke-width: 2; }
+  .diagram .edge-alice { stroke: var(--alice); stroke-width: 2.5; fill: none; }
+  .diagram .edge-agent { stroke: var(--agent); stroke-width: 2.5; fill: none; stroke-dasharray: 7 6; }
+  .diagram .lbl-alice { fill: var(--alice); font-weight: 700; font-size: 14px; }
+  .diagram .lbl-agent { fill: var(--agent); font-weight: 700; font-size: 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 14px; color: var(--muted); font-size: 15px; }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .legend .solid, .legend .dashed { width: 30px; height: 0; border-top: 3px solid var(--alice); }
+  .legend .dashed { border-top: 3px dashed var(--agent); }
+
+  .shared { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  @media (max-width: 860px) { .shared { grid-template-columns: 1fr; } }
+  .shared h3 { margin: 0 0 6px; font-size: 19px; }
+  .shared p { margin: 0; color: var(--muted); }
+  .kind { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 13px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-chip); margin-bottom: 10px; border: 1.5px solid var(--ink); }
+  .never { margin-top: 34px; padding: 18px 20px; border-left: 4px solid var(--ink); background: var(--surface); max-width: var(--measure); }
+  .never p { margin: 0; }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; gap: 22px; max-width: 780px; }
+  .steps li { counter-increment: step; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 4px 14px; }
+  .steps li::before { content: counter(step); grid-row: span 2; width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--ink); display: grid; place-items: center; font-weight: 800; }
+  .steps h3 { margin: 4px 0 6px; font-size: 18px; }
+  .steps pre { margin: 0; background: var(--term); color: var(--term-text); border-radius: var(--radius-panel); padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.6; }
+  .steps pre code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
+  .steps pre .c { color: var(--term-dim); }
+  .steps p { margin: 0 0 8px; color: var(--muted); }
+
+  footer { margin-top: 90px; padding: 28px 0 48px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 15px; }
+  footer p { margin: 0 0 8px; max-width: var(--measure); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="#"><span aria-hidden="true"></span>teamroom</a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#start">Get started</a>
+      <a href="https://github.com/VassoD/teamroom">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>Find out before the <mark>merge conflict</mark> does.</h1>
+    <p>teamroom tells you, and your coding agent, which files your teammates are changing right now. Before you touch them.</p>
+  </section>
+
+  <section class="replay" aria-label="Replay: how teamroom catches a conflict">
+    <div class="panes">
+      <div class="pane">
+        <header><i class="who alice" aria-hidden="true"></i>Alice <small>terminal, feat/theme</small></header>
+        <div class="body" id="pane-alice" aria-live="polite"></div>
+      </div>
+      <div class="pane room">
+        <header><i class="who room" aria-hidden="true"></i>The room <small>shared by the team</small></header>
+        <div class="body" id="pane-room" aria-live="polite"></div>
+      </div>
+      <div class="pane">
+        <header><i class="who agent" aria-hidden="true"></i>Bob's agent <small>Claude Code, main</small></header>
+        <div class="body" id="pane-agent" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button type="button" class="secondary" id="btn-back">Back</button>
+      <button type="button" id="btn-next">Start the replay</button>
+      <p class="caption" id="caption"><strong id="caption-step">Five steps, about a minute</strong><span id="caption-text">Alice and Bob are about to edit the same file. Neither knows yet.</span></p>
+      <div class="progress" id="progress" aria-hidden="true"></div>
+    </div>
+  </section>
+</div>
+
+<section class="block" id="how">
+  <div class="wrap">
+    <h2>Two safety nets, trusted differently</h2>
+    <p>Everything teamroom knows arrives through one of two doors. One is guaranteed. The other depends on the model.</p>
+
+    <div class="nets">
+      <div class="net hook">
+        <h3><i class="who alice" aria-hidden="true"></i>Git hooks</h3>
+        <p class="verdict">Always runs. Git calls it, not the model.</p>
+        <ul>
+          <li>Fires after every commit, checkout, merge and rebase.</li>
+          <li>Sends the list of files this checkout has changed compared with <code>main</code>, including uncommitted and untracked ones.</li>
+          <li>Runs in the background. If the server is down, your commit still goes through.</li>
+        </ul>
+      </div>
+      <div class="net mcp">
+        <h3><i class="who agent" aria-hidden="true"></i>MCP tools</h3>
+        <p class="verdict">Runs when the agent decides to call it.</p>
+        <ul>
+          <li><code>teamroom_check_overlap</code> asks who else is touching these files.</li>
+          <li><code>teamroom_report_work</code> and <code>teamroom_post_note</code> share what the agent is doing.</li>
+          <li><code>teamroom_recent_activity</code> reads the room before starting.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="pullquote">The hook is enforced. The tools are a request. The room stays accurate even when an agent ignores its instructions.</p>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <h2>Where everything lives</h2>
+    <p>A small server holds the room. Each checkout talks to it through the hooks and the CLI. Each agent talks to it through the MCP server running on the same machine.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 900 300" role="img" aria-labelledby="diagram-title">
+        <title id="diagram-title">Alice's checkout sends reports through git hooks to the teamroom server. Bob's agent asks the server through MCP tools.</title>
+        <rect class="box" x="20" y="60" width="240" height="180" rx="10"/>
+        <text x="40" y="96" font-size="18" font-weight="700">Alice's checkout</text>
+        <text class="sub" x="40" y="120">feat/theme</text>
+        <text class="mono-t" x="40" y="160">.git/hooks/post-commit</text>
+        <text class="mono-t" x="40" y="182">.git/hooks/post-checkout</text>
+        <text class="mono-t" x="40" y="204">.git/teamroom.json</text>
+
+        <rect class="room-box" x="330" y="80" width="240" height="140" rx="10"/>
+        <text x="350" y="116" font-size="18" font-weight="700">teamroom server</text>
+        <text class="sub" x="350" y="140">rooms, members, activity</text>
+        <text class="mono-t" x="350" y="180">teamroom serve</text>
+        <text class="mono-t" x="350" y="202">one JSON file per room</text>
+
+        <rect class="box" x="640" y="60" width="240" height="180" rx="10"/>
+        <text x="660" y="96" font-size="18" font-weight="700">Bob's agent</text>
+        <text class="sub" x="660" y="120">main</text>
+        <text class="mono-t" x="660" y="160">teamroom mcp</text>
+        <text class="mono-t" x="660" y="182">stdio, on Bob's machine</text>
+        <text class="mono-t" x="660" y="204">.git/teamroom.json</text>
+
+        <path class="edge-alice" d="M260 150 H322" marker-end="url(#arrow-alice)"/>
+        <text class="lbl-alice" x="268" y="140">report</text>
+        <path class="edge-agent" d="M640 130 H578" marker-end="url(#arrow-agent)"/>
+        <text class="lbl-agent" x="584" y="120">check</text>
+        <path class="edge-agent" d="M578 172 H632" marker-end="url(#arrow-agent)"/>
+        <text class="lbl-agent" x="584" y="196">overlap</text>
+
+        <defs>
+          <marker id="arrow-alice" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--alice)"/></marker>
+          <marker id="arrow-agent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--agent)"/></marker>
+        </defs>
+      </svg>
+      <div class="legend">
+        <span><i class="solid" aria-hidden="true"></i>Guaranteed: sent by git hooks</span>
+        <span><i class="dashed" aria-hidden="true"></i>Requested: called by the agent</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <h2>What the room sees</h2>
+    <p>Three kinds of entries. Each one carries a name, a branch and a list of file paths.</p>
+    <div class="shared">
+      <div>
+        <span class="kind">wip</span>
+        <h3>Work in progress</h3>
+        <p>Every file a checkout has changed but not merged yet. A new snapshot from the same checkout replaces the old one, so finished work stops showing up.</p>
+      </div>
+      <div>
+        <span class="kind">commit</span>
+        <h3>Commits</h3>
+        <p>The files one commit changed. Once that commit is on <code>main</code>, it no longer counts as overlap. It can't conflict anymore.</p>
+      </div>
+      <div>
+        <span class="kind">note</span>
+        <h3>Notes</h3>
+        <p>A sentence from a person or an agent, like "about to refactor auth/". Optionally tied to files.</p>
+      </div>
+    </div>
+    <div class="never">
+      <p><strong>File contents never leave your machine.</strong> The room gets paths, branch names, commit ids and short messages. Tokens are stored hashed on the server and kept in <code>.git/teamroom.json</code> on yours, readable only by you.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="start">
+  <div class="wrap">
+    <h2>Get started</h2>
+    <p>You need Node 20 or newer and a server your team can reach.</p>
+    <ol class="steps">
+      <li>
+        <h3>Start a server</h3>
+        <pre><code>npx teamroom serve --host 0.0.0.0 --port 8787</code></pre>
+      </li>
+      <li>
+        <h3>Create a room from your repo</h3>
+        <pre><code>teamroom create --server http://your-server:8787 \
+  --room-name "Dark mode" --name alice
+teamroom hooks install</code></pre>
+      </li>
+      <li>
+        <h3>Teammates join with the command it prints</h3>
+        <pre><code>teamroom join --server http://your-server:8787 \
+  --room room_… --invite tri_… --name bob
+teamroom hooks install</code></pre>
+      </li>
+      <li>
+        <h3>Give your agent the tools</h3>
+        <pre><code>claude mcp add teamroom -- teamroom mcp
+codex mcp add teamroom -- teamroom mcp</code></pre>
+      </li>
+      <li>
+        <h3>Check before you edit</h3>
+        <pre><code>teamroom check            <span class="c"># your pending changes</span>
+teamroom check src/theme.ts</code></pre>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>teamroom is MIT licensed. It grew out of Codex Team Brief, built at a Codex hackathon by Vasiliki Doropoulou and Amit Agarwal.</p>
+    <p>The idea behind the two safety nets: <a href="https://vassi.fyi/writing/the-commit-that-talks-before-you-push">The Commit That Talks Before You Push</a>.</p>
+  </div>
+</footer>
+
+<script>
+  const STEPS = [
+    {
+      title: "Alice starts a change",
+      text: "Alice edits the theme on her branch. The moment she switches branch or commits, a git hook reports her changed files to the room. Nobody asked it to.",
+      alice: [
+        { cls: "cmd", text: "git switch -c feat/theme" },
+        { cls: "cmd", text: "vim src/theme.ts src/tokens.css" },
+        { cls: "cmd", text: 'git commit -am "feat: dark palette"' },
+        { cls: "dim", text: "[feat/theme 4e1c2a9] feat: dark palette" },
+        { cls: "dim", text: "# the hook reports in the background, silently" },
+      ],
+      room: [
+        { who: "alice", html: '<b>alice</b> is changing <span class="file-chip">src/theme.ts</span> <span class="file-chip">src/tokens.css</span><span class="meta">wip, feat/theme, just now</span>' },
+      ],
+    },
+    {
+      title: "Bob gives his agent a task",
+      text: "On another machine, Bob asks Claude Code to restyle the header. The agent plans its edits, and one of them is the same theme file.",
+      agent: [
+        { cls: "say", text: "Bob: Make the header use the new brand blue." },
+        { cls: "dim", text: "Plan: edit src/header.tsx and src/theme.ts" },
+      ],
+    },
+    {
+      title: "The agent asks the room first",
+      text: "The agent calls an MCP tool before editing. This is the part that depends on the model: the tool only runs if the agent decides to call it.",
+      agent: [
+        { cls: "tool", text: "▸ teamroom_check_overlap" },
+        { cls: "dim", text: '  files: ["src/header.tsx", "src/theme.ts"]' },
+      ],
+      hot: true,
+    },
+    {
+      title: "The room answers",
+      text: "Alice changed src/theme.ts a few minutes ago, on a branch that isn't merged yet. The agent stops and tells Bob instead of editing blind.",
+      agent: [
+        { cls: "warn", text: "src/theme.ts\n  - alice (web-3f2a1c on feat/theme), wip 3m ago: Changing 2 files on feat/theme." },
+        { cls: "say", text: "Agent: Alice is changing src/theme.ts on feat/theme. I'll edit only the header for now and leave the theme to her." },
+        { cls: "tool", text: "▸ teamroom_post_note" },
+      ],
+      room: [
+        { who: "agent", html: '<b>bob</b> (agent): Restyling the header only. Leaving <span class="file-chip hot">src/theme.ts</span> to Alice.<span class="meta">note, main, just now</span>' },
+      ],
+    },
+    {
+      title: "Alice's PR merges, the warning clears",
+      text: "Her pull request lands on main. When she pulls, the hook sends a new snapshot with nothing pending, and the room stops warning anyone about those files.",
+      alice: [
+        { cls: "dim", text: "# PR #42 merged on GitHub" },
+        { cls: "cmd", text: "git switch main && git pull" },
+      ],
+      room: [
+        { who: "alice", html: '<b>alice</b> has no pending changes<span class="meta">wip, main, just now</span>' },
+      ],
+      clearFirst: true,
+    },
+  ];
+
+  const panes = {
+    alice: document.getElementById("pane-alice"),
+    room: document.getElementById("pane-room"),
+    agent: document.getElementById("pane-agent"),
+  };
+  const nextButton = document.getElementById("btn-next");
+  const backButton = document.getElementById("btn-back");
+  const captionStep = document.getElementById("caption-step");
+  const captionText = document.getElementById("caption-text");
+  const progress = document.getElementById("progress");
+  let current = 0;
+
+  STEPS.forEach(() => progress.appendChild(document.createElement("i")));
+
+  function termLine({ cls, text }, animate) {
+    const line = document.createElement("span");
+    line.className = `line ${cls}${animate ? " enter" : ""}`;
+    line.textContent = text;
+    return line;
+  }
+
+  function feedItem({ who, html }, animate) {
+    const item = document.createElement("span");
+    item.className = `feed-item ${who}${animate ? " enter" : ""}`;
+    item.innerHTML = html;
+    return item;
+  }
+
+  function empty(pane, text) {
+    const note = document.createElement("span");
+    note.className = "empty";
+    note.textContent = text;
+    pane.appendChild(note);
+  }
+
+  function render(stepCount) {
+    Object.values(panes).forEach((pane) => pane.replaceChildren());
+
+    for (let index = 0; index < stepCount; index++) {
+      const step = STEPS[index];
+      const animate = index === stepCount - 1;
+      if (step.clearFirst) {
+        panes.room.querySelectorAll(".feed-item.alice").forEach((item) => item.classList.add("gone"));
+        panes.room.querySelectorAll(".file-chip.hot").forEach((chip) => chip.classList.remove("hot"));
+      }
+      step.alice?.forEach((line) => panes.alice.appendChild(termLine(line, animate)));
+      step.agent?.forEach((line) => panes.agent.appendChild(termLine(line, animate)));
+      step.room?.forEach((item) => panes.room.prepend(feedItem(item, animate)));
+      if (step.hot && !STEPS.slice(index + 1, stepCount).some((later) => later.clearFirst)) {
+        panes.room.querySelectorAll(".feed-item.alice .file-chip").forEach((chip) => {
+          if (chip.textContent === "src/theme.ts") chip.classList.add("hot");
+        });
+      }
+    }
+
+    if (!panes.alice.childElementCount) empty(panes.alice, "Idle.");
+    if (!panes.room.childElementCount) empty(panes.room, "No activity yet.");
+    if (!panes.agent.childElementCount) empty(panes.agent, "Waiting for Bob.");
+
+    [...progress.children].forEach((bar, index) => bar.classList.toggle("on", index < stepCount));
+    backButton.disabled = stepCount === 0;
+
+    if (stepCount === 0) {
+      captionStep.textContent = "Five steps, about a minute";
+      captionText.textContent = "Alice and Bob are about to edit the same file. Neither knows yet.";
+      nextButton.textContent = "Start the replay";
+    } else {
+      const step = STEPS[stepCount - 1];
+      captionStep.textContent = `Step ${stepCount} of ${STEPS.length}: ${step.title}`;
+      captionText.textContent = step.text;
+      nextButton.textContent = stepCount === STEPS.length ? "Replay from the start" : "Next step";
+    }
+  }
+
+  nextButton.addEventListener("click", () => {
+    current = current === STEPS.length ? 0 : current + 1;
+    render(current);
+  });
+  backButton.addEventListener("click", () => {
+    current = Math.max(0, current - 1);
+    render(current);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.target.closest?.("input, textarea")) return;
+    if (event.key === "ArrowRight") nextButton.click();
+    if (event.key === "ArrowLeft" && !backButton.disabled) backButton.click();
+  });
+
+  const linkedStep = Number(/^#step-(\d)$/.exec(location.hash)?.[1]);
+  current = linkedStep >= 1 && linkedStep <= STEPS.length ? linkedStep : 0;
+  render(current);
+</script>
+</body>
+</html>
