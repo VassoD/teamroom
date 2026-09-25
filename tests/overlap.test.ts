@@ -67,7 +67,14 @@ describe("findOverlaps", () => {
 
   it("should not let a wip snapshot hide notes about the same file", () => {
     const activity = [
-      entry({ member: "bo", session: "s1", kind: "note", text: "renaming User", files: ["src/user.ts"], createdAt: hoursAgo(3) }),
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "note",
+        text: "renaming User",
+        files: ["src/user.ts"],
+        createdAt: hoursAgo(3),
+      }),
       entry({ member: "bo", session: "s1", files: [], createdAt: hoursAgo(1) }),
     ];
 
@@ -80,7 +87,9 @@ describe("findOverlaps", () => {
     const activity = [entry({ member: "bo", files: ["src/auth.ts"], createdAt: hoursAgo(80) })];
 
     expect(findOverlaps({ activity, files: ["src/auth.ts"], member: "ada", now: NOW })).toEqual([]);
-    expect(findOverlaps({ activity, files: ["src/auth.ts"], member: "ada", sinceHours: 100, now: NOW })).toHaveLength(1);
+    expect(findOverlaps({ activity, files: ["src/auth.ts"], member: "ada", sinceHours: 100, now: NOW })).toHaveLength(
+      1
+    );
   });
 
   it("should keep only the latest touch per session and sort newest first", () => {

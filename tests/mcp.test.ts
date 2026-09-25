@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError } from "../src/client/errors.js";
 import type { Workspace } from "../src/client/workspace.js";
-import { SUPPORTED_PROTOCOL_VERSIONS, createMcpHandler } from "../src/mcp/server.js";
+import { createMcpHandler, SUPPORTED_PROTOCOL_VERSIONS } from "../src/mcp/server.js";
 
 function request(id: number, method: string, params?: unknown): string {
   return JSON.stringify({ jsonrpc: "2.0", id, method, params });
@@ -44,7 +44,9 @@ describe("MCP handler", () => {
   });
 
   it("should not answer notifications", async () => {
-    expect(await handler.handle(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }))).toBeUndefined();
+    expect(
+      await handler.handle(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }))
+    ).toBeUndefined();
   });
 
   it("should reject unknown methods and malformed messages", async () => {

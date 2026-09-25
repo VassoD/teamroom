@@ -79,7 +79,10 @@ describe("teamroom HTTP API", () => {
 
     expect(status).toBe(200);
     expect(json.data?.overlaps).toEqual([
-      { file: "src/auth.ts", touchedBy: [expect.objectContaining({ member: "bo", session: "bo-laptop", kind: "wip" })] },
+      {
+        file: "src/auth.ts",
+        touchedBy: [expect.objectContaining({ member: "bo", session: "bo-laptop", kind: "wip" })],
+      },
     ]);
   });
 
@@ -176,7 +179,9 @@ describe("teamroom HTTP API", () => {
     });
 
     it("should be owner only", async () => {
-      const { status } = await call(setup.app, "POST", `/v1/rooms/${setup.roomId}/invite`, { token: setup.memberToken });
+      const { status } = await call(setup.app, "POST", `/v1/rooms/${setup.roomId}/invite`, {
+        token: setup.memberToken,
+      });
 
       expect(status).toBe(403);
     });

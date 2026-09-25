@@ -14,7 +14,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "git",
@@ -28,12 +28,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
     "serve": "node dist/cli/index.js serve",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
+    "dev": "tsc -p tsconfig.build.json --watch"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
@@ -43,10 +45,11 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/node": "22.20.4",
     "@types/react": "19.2.2",
     "ink-testing-library": "4.0.0",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vitest": "5.0.2"
   }
 }
