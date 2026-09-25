@@ -28,14 +28,16 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "dev": "node scripts/dev.js",
+    "dev:build": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm test",
     "serve": "node dist/cli/index.js serve",
-    "prepublishOnly": "npm run typecheck && npm run lint && npm test && npm run build",
-    "dev": "tsc -p tsconfig.build.json --watch"
+    "prepublishOnly": "npm run check && npm run build"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
