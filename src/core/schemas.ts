@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AGENT_ID_PATTERN, MAX_AGENT_ID_LENGTH } from "./agents.js";
 
 export const MAX_TEXT_LENGTH = 500;
 export const MAX_FILES_PER_ACTIVITY = 200;
@@ -10,7 +11,7 @@ export const MAX_OVERLAP_WINDOW_HOURS = 24 * 90;
 
 export const ROOM_ID_PATTERN = /^room_[A-Za-z0-9_-]{16}$/;
 
-const activityKindSchema = z.enum(["wip", "commit", "note"]);
+const activityKindSchema = z.enum(["wip", "commit", "note", "edit"]);
 const activitySourceSchema = z.enum(["human", "hook", "agent"]);
 const memberRoleSchema = z.enum(["owner", "member"]);
 
@@ -32,6 +33,12 @@ export const sessionSchema = z
   .max(MAX_SESSION_LENGTH)
   .regex(/^[A-Za-z0-9._:/-]+$/, "Session may only contain letters, digits and . _ : / -");
 
+export const agentIdSchema = z
+  .string()
+  .min(1)
+  .max(MAX_AGENT_ID_LENGTH)
+  .regex(AGENT_ID_PATTERN, "Agent may only contain lowercase letters, digits and . _ -");
+
 export const activityTextSchema = z.string().trim().min(1).max(MAX_TEXT_LENGTH);
 
 export const filePathSchema = z.string().trim().min(1).max(MAX_FILE_PATH_LENGTH);
@@ -42,6 +49,7 @@ export const activitySchema = z.object({
   session: z.string().optional(),
   kind: activityKindSchema,
   source: activitySourceSchema,
+  agent: z.string().optional(),
   text: z.string(),
   branch: z.string().optional(),
   commit: z.string().optional(),
@@ -66,6 +74,7 @@ export const fileOverlapSchema = z.object({
     z.object({
       member: z.string(),
       session: z.string().optional(),
+      agent: z.string().optional(),
       kind: activityKindSchema,
       text: z.string(),
       branch: z.string().optional(),
@@ -88,6 +97,7 @@ export const joinRoomRequestSchema = z.object({
 export const postActivityRequestSchema = z.object({
   kind: activityKindSchema.default("note"),
   source: activitySourceSchema.default("human"),
+  agent: agentIdSchema.optional(),
   session: sessionSchema.optional(),
   text: activityTextSchema,
   branch: z.string().trim().min(1).max(200).optional(),

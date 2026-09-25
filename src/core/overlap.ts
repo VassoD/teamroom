@@ -50,6 +50,7 @@ export function findOverlaps({
         bySession.set(key, {
           member: entry.member,
           session: entry.session,
+          agent: entry.agent,
           kind: entry.kind,
           text: entry.text,
           branch: entry.branch,

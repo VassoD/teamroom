@@ -3,8 +3,9 @@
  *   snapshot from the same session replaces the older one.
  * - `commit`: files changed by one commit.
  * - `note`: free text, optionally about files ("about to refactor auth/").
+ * - `edit`: files one coding agent just edited, reported by the agent's own hook.
  */
-export type ActivityKind = "wip" | "commit" | "note";
+export type ActivityKind = "wip" | "commit" | "note" | "edit";
 
 /** Who produced an activity entry: a person at the CLI, the git hook, or a coding agent via MCP. */
 export type ActivitySource = "human" | "hook" | "agent";
@@ -25,6 +26,8 @@ export interface Activity {
   session?: string;
   kind: ActivityKind;
   source: ActivitySource;
+  /** Which coding agent posted it, such as `claude-code` or `codex`. Only set when `source` is `agent`. */
+  agent?: string;
   text: string;
   branch?: string;
   commit?: string;
@@ -61,6 +64,7 @@ export interface RoomView {
 export interface OverlapTouch {
   member: string;
   session?: string;
+  agent?: string;
   kind: ActivityKind;
   text: string;
   branch?: string;

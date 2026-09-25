@@ -13,7 +13,7 @@ export interface NewRoomResult {
 }
 
 export type ActivityInput = Required<Pick<PostActivityRequest, "kind" | "source" | "text" | "files">> &
-  Pick<PostActivityRequest, "session" | "branch" | "commit">;
+  Pick<PostActivityRequest, "session" | "agent" | "branch" | "commit">;
 
 export function createRoom(name: string, creatorName: string, now = new Date()): NewRoomResult {
   const inviteCode = newInviteCode();
@@ -99,6 +99,8 @@ export function appendActivity(
     id: randomUUID(),
     member: memberName,
     session: input.session,
+    // An agent name only means something on agent activity.
+    agent: input.source === "agent" ? input.agent : undefined,
     kind: input.kind,
     source: input.source,
     text: input.text,
