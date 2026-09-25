@@ -7,7 +7,7 @@ import { buildDashboard, flattenSessions } from "./model.js";
 import { RecentActivity } from "./RecentActivity.js";
 import { SessionDetail } from "./SessionDetail.js";
 import { StatusBar } from "./StatusBar.js";
-import { useRoomPolling, type FetchRoom } from "./useRoomPolling.js";
+import { type FetchRoom, useRoomPolling } from "./useRoomPolling.js";
 
 const CLOCK_TICK_MS = 1_000;
 
@@ -34,7 +34,10 @@ export function DashboardApp({ fetchRoom, pollIntervalMs, fixedNow }: DashboardP
     () => new Set(dashboard?.hotFiles.flatMap((hotFile) => hotFile.sessions) ?? []),
     [dashboard]
   );
-  const selectedIndex = Math.max(0, sessions.findIndex((session) => session.key === selectedKey));
+  const selectedIndex = Math.max(
+    0,
+    sessions.findIndex((session) => session.key === selectedKey)
+  );
   const selected = sessions[selectedIndex];
 
   useInput((input, key) => {

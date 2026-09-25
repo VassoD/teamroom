@@ -90,7 +90,7 @@ export function removeBlock(content: string): string {
   if (start === -1 || end === -1) return content;
   const before = content.slice(0, start).trimEnd();
   const after = content.slice(end + BLOCK_END.length).trim();
-  return [before, after].filter(Boolean).join("\n\n") + "\n";
+  return `${[before, after].filter(Boolean).join("\n\n")}\n`;
 }
 
 async function readIfExists(file: string): Promise<string | undefined> {

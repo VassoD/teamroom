@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RoomView } from "../core/types.js";
 import { describeError } from "../client/errors.js";
+import type { RoomView } from "../core/types.js";
 
 export const DEFAULT_POLL_INTERVAL_MS = 3_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -30,6 +30,7 @@ export function useRoomPolling(fetchRoom: FetchRoom, intervalMs = DEFAULT_POLL_I
   const [refreshCount, setRefreshCount] = useState(0);
   const failures = useRef(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: bumping refreshCount is how refresh() re-runs this effect.
   useEffect(() => {
     const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;

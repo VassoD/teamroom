@@ -26,7 +26,11 @@ function room(activity: Activity[], members = ["alice", "bob", "carol"]): RoomVi
   return {
     id: "room_AAAAAAAAAAAAAAAA",
     name: "Dark mode",
-    members: members.map((name, index) => ({ name, role: index === 0 ? "owner" : "member", joinedAt: minutesAgo(1000) })),
+    members: members.map((name, index) => ({
+      name,
+      role: index === 0 ? "owner" : "member",
+      joinedAt: minutesAgo(1000),
+    })),
     activity,
     createdAt: minutesAgo(1000),
     updatedAt: minutesAgo(1),
@@ -58,7 +62,12 @@ describe("buildDashboard", () => {
       "alice",
       NOW
     );
-    expect(dashboard.totals).toEqual({ members: 3, activeSessions: 2, activeAgents: 1, activeAgentsByLabel: { agent: 1 } });
+    expect(dashboard.totals).toEqual({
+      members: 3,
+      activeSessions: 2,
+      activeAgents: 1,
+      activeAgentsByLabel: { agent: 1 },
+    });
     expect(dashboard.members.find((member) => member.name === "bob")?.activeAgents).toBe(1);
   });
 
@@ -97,7 +106,11 @@ describe("buildDashboard", () => {
       NOW
     );
     expect(dashboard.hotFiles).toEqual([
-      { file: "src/theme.ts", sessions: ["alice/web-aaaaaa", "alice/web-bbbbbb", "bob/web-cccccc"], members: ["alice", "bob"] },
+      {
+        file: "src/theme.ts",
+        sessions: ["alice/web-aaaaaa", "alice/web-bbbbbb", "bob/web-cccccc"],
+        members: ["alice", "bob"],
+      },
     ]);
   });
 
@@ -115,7 +128,10 @@ describe("buildDashboard", () => {
 
   it("should list me first, then the most recently active, then silent members", () => {
     const dashboard = buildDashboard(
-      room([entry({ member: "carol", createdAt: minutesAgo(1) }), entry({ member: "alice", createdAt: minutesAgo(9) })]),
+      room([
+        entry({ member: "carol", createdAt: minutesAgo(1) }),
+        entry({ member: "alice", createdAt: minutesAgo(9) }),
+      ]),
       "bob",
       NOW
     );
@@ -125,9 +141,30 @@ describe("buildDashboard", () => {
   it("should name each agent and count Claude Code and Codex separately", () => {
     const dashboard = buildDashboard(
       room([
-        entry({ member: "bob", session: "web", source: "agent", agent: "claude-code", kind: "note", createdAt: minutesAgo(2) }),
-        entry({ member: "bob", session: "web", source: "agent", agent: "codex", kind: "note", createdAt: minutesAgo(1) }),
-        entry({ member: "carol", session: "api", source: "agent", agent: "claude-code", kind: "note", createdAt: minutesAgo(3) }),
+        entry({
+          member: "bob",
+          session: "web",
+          source: "agent",
+          agent: "claude-code",
+          kind: "note",
+          createdAt: minutesAgo(2),
+        }),
+        entry({
+          member: "bob",
+          session: "web",
+          source: "agent",
+          agent: "codex",
+          kind: "note",
+          createdAt: minutesAgo(1),
+        }),
+        entry({
+          member: "carol",
+          session: "api",
+          source: "agent",
+          agent: "claude-code",
+          kind: "note",
+          createdAt: minutesAgo(3),
+        }),
       ]),
       "alice",
       NOW
@@ -143,8 +180,22 @@ describe("buildDashboard", () => {
     const dashboard = buildDashboard(
       room([
         entry({ kind: "wip", files: ["README.md"], createdAt: minutesAgo(10) }),
-        entry({ kind: "edit", source: "agent", agent: "claude-code", text: "Claude Code edited src/a.ts", files: ["src/a.ts"], createdAt: minutesAgo(4) }),
-        entry({ kind: "edit", source: "agent", agent: "claude-code", text: "Claude Code edited src/b.ts", files: ["src/b.ts"], createdAt: minutesAgo(2) }),
+        entry({
+          kind: "edit",
+          source: "agent",
+          agent: "claude-code",
+          text: "Claude Code edited src/a.ts",
+          files: ["src/a.ts"],
+          createdAt: minutesAgo(4),
+        }),
+        entry({
+          kind: "edit",
+          source: "agent",
+          agent: "claude-code",
+          text: "Claude Code edited src/b.ts",
+          files: ["src/b.ts"],
+          createdAt: minutesAgo(2),
+        }),
       ]),
       "alice",
       NOW
@@ -174,7 +225,14 @@ describe("buildDashboard", () => {
     const dashboard = buildDashboard(
       room([
         entry({ member: "alice", session: "web", files: ["src/theme.ts"] }),
-        entry({ member: "bob", session: "app", kind: "edit", source: "agent", agent: "claude-code", files: ["src/theme.ts"] }),
+        entry({
+          member: "bob",
+          session: "app",
+          kind: "edit",
+          source: "agent",
+          agent: "claude-code",
+          files: ["src/theme.ts"],
+        }),
       ]),
       "alice",
       NOW

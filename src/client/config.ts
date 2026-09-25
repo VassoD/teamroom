@@ -32,10 +32,7 @@ export function configPath(gitCommonDir: string): string {
 }
 
 /** Environment variables win over the file, which lets CI or a shared agent box inject credentials. */
-export async function loadConfig(
-  gitCommonDir: string,
-  env: NodeJS.ProcessEnv = process.env
-): Promise<TeamroomConfig> {
+export async function loadConfig(gitCommonDir: string, env: NodeJS.ProcessEnv = process.env): Promise<TeamroomConfig> {
   const fromFile = await readConfigFile(configPath(gitCommonDir));
   const merged = {
     server: env[ENV.server] ?? fromFile?.server,

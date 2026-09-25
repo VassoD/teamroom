@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import { formatAge } from "../client/workspace.js";
-import { sessionAgentLabel, type Dashboard, type MemberSummary, type SessionSummary } from "./model.js";
+import { type Dashboard, type MemberSummary, type SessionSummary, sessionAgentLabel } from "./model.js";
 import { COLORS, SYMBOLS } from "./theme.js";
 
 interface MemberListProps {
@@ -19,10 +19,15 @@ export function MemberList({ dashboard, selectedKey, hotSessionKeys, now }: Memb
             <Text bold>{member.name}</Text>
             {member.isMe && <Text dimColor> (you)</Text>}
             {member.role === "owner" && <Text dimColor> owner</Text>}
-            {member.activeAgents > 0 && <Text color={COLORS.agent}>{"  "}{describeMemberAgents(member)}</Text>}
+            {member.activeAgents > 0 && (
+              <Text color={COLORS.agent}>
+                {"  "}
+                {describeMemberAgents(member)}
+              </Text>
+            )}
           </Text>
           {member.sessions.length === 0 ? (
-            <Text dimColor>  No activity in the last 3 days.</Text>
+            <Text dimColor>{"  No activity in the last 3 days."}</Text>
           ) : (
             member.sessions.map((session) => (
               <SessionRow
@@ -81,11 +86,15 @@ function SessionRow({ session, selected, hot, now }: SessionRowProps): React.JSX
         </Text>
       </Box>
       <Box width={18} flexShrink={0}>
-        <Text dimColor wrap="truncate-end">{session.branch ?? ""}</Text>
+        <Text dimColor wrap="truncate-end">
+          {session.branch ?? ""}
+        </Text>
       </Box>
       <Box width={16} flexShrink={0}>
         {session.hasAgent ? (
-          <Text color={COLORS.agent} wrap="truncate-end">{describeSessionAgents(session)}</Text>
+          <Text color={COLORS.agent} wrap="truncate-end">
+            {describeSessionAgents(session)}
+          </Text>
         ) : (
           <Text dimColor>person</Text>
         )}

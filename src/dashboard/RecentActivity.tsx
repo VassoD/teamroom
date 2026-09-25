@@ -1,7 +1,7 @@
 import { Box, Text } from "ink";
-import type { Activity } from "../core/types.js";
-import { agentLabel } from "../core/agents.js";
 import { formatAge } from "../client/workspace.js";
+import { agentLabel } from "../core/agents.js";
+import type { Activity } from "../core/types.js";
 import { COLORS, SYMBOLS } from "./theme.js";
 
 interface RecentActivityProps {

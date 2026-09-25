@@ -19,7 +19,10 @@ export function HotFiles({ hotFiles }: HotFilesProps): React.JSX.Element | null 
       {shown.map((hotFile) => (
         <Text key={hotFile.file} wrap="truncate-end">
           <Text color={COLORS.overlap}>{hotFile.file}</Text>
-          <Text dimColor>  {hotFile.members.join(", ")}</Text>
+          <Text dimColor>
+            {"  "}
+            {hotFile.members.join(", ")}
+          </Text>
           {hotFile.members.length < hotFile.sessions.length && (
             <Text dimColor> ({hotFile.sessions.length} sessions)</Text>
           )}

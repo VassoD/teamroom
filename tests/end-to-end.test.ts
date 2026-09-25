@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { serve, type ServerType } from "@hono/node-server";
+import { type ServerType, serve } from "@hono/node-server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ApiClient } from "../src/client/api-client.js";
 import { saveConfig } from "../src/client/config.js";
@@ -46,8 +46,9 @@ describe("two worktrees of one member", () => {
     await git(mainRepo, "worktree", "add", "--quiet", "-b", "feature-b", path.join(tempDir, "b"));
 
     server = await new Promise<ServerType>((resolve) => {
-      const started = serve({ fetch: createApp({ store: new MemoryRoomStore() }).fetch, port: 0, hostname: "127.0.0.1" }, () =>
-        resolve(started)
+      const started = serve(
+        { fetch: createApp({ store: new MemoryRoomStore() }).fetch, port: 0, hostname: "127.0.0.1" },
+        () => resolve(started)
       );
     });
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

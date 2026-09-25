@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { Hono, type Context } from "hono";
+import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
 import { findOverlaps } from "../core/overlap.js";
 import {
-  MAX_ACTIVITY_KEPT,
-  MAX_MEMBERS,
   addMember,
   appendActivity,
   createRoom,
   findMemberByToken,
   inviteCodeIsValid,
+  MAX_ACTIVITY_KEPT,
+  MAX_MEMBERS,
   removeMember,
   rotateInvite,
   rotateMemberToken,
@@ -25,8 +25,8 @@ import {
   roomIdSchema,
 } from "../core/schemas.js";
 import type { Member, Room } from "../core/types.js";
-import { RoomNotFoundError, StoreLockTimeoutError, type RoomStore } from "../store/store.js";
-import { silentLogger, type Logger } from "./logger.js";
+import { RoomNotFoundError, type RoomStore, StoreLockTimeoutError } from "../store/store.js";
+import { type Logger, silentLogger } from "./logger.js";
 import { RateLimiter, type RateLimitRule } from "./rate-limit.js";
 
 const DEFAULT_ACTIVITY_LIMIT = 50;
@@ -164,7 +164,10 @@ export function createApp({
       return joined.room;
     });
 
-    return context.json({ data: { room: toRoomView(room, DEFAULT_ACTIVITY_LIMIT), me: input.name, token: issuedToken } }, 201);
+    return context.json(
+      { data: { room: toRoomView(room, DEFAULT_ACTIVITY_LIMIT), me: input.name, token: issuedToken } },
+      201
+    );
   });
 
   app.get("/v1/rooms/:roomId", async (context) => {

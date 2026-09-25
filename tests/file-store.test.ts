@@ -41,8 +41,10 @@ describe("FileRoomStore", () => {
 
     await Promise.all(
       Array.from({ length: PARALLEL_WRITES }, (_, index) =>
-        stores[index % stores.length]?.update(room.id, (current) =>
-          appendActivity(current, "ada", { kind: "note", source: "human", text: `note ${index}`, files: [] }).room
+        stores[index % stores.length]?.update(
+          room.id,
+          (current) =>
+            appendActivity(current, "ada", { kind: "note", source: "human", text: `note ${index}`, files: [] }).room
         )
       )
     );

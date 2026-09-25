@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  claudeHookCommand,
   CLAUDE_SETTINGS_FILE,
+  claudeHookCommand,
   installClaudeHook,
   parseClaudeEdit,
   uninstallClaudeHook,
@@ -26,7 +26,9 @@ describe("parseClaudeEdit", () => {
   });
 
   it("should read notebook edits", () => {
-    const edit = parseClaudeEdit(payload({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/a.ipynb" } }));
+    const edit = parseClaudeEdit(
+      payload({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/a.ipynb" } })
+    );
     expect(edit?.file).toBe("/repo/a.ipynb");
   });
 
@@ -43,7 +45,8 @@ describe("parseClaudeEdit", () => {
 describe("Claude Code hook install", () => {
   let repo: string;
   const settingsPath = (): string => path.join(repo, CLAUDE_SETTINGS_FILE);
-  const readSettings = async (): Promise<Record<string, unknown> & { hooks: { PostToolUse: unknown[] } }> => JSON.parse(await readFile(settingsPath(), "utf8"));
+  const readSettings = async (): Promise<Record<string, unknown> & { hooks: { PostToolUse: unknown[] } }> =>
+    JSON.parse(await readFile(settingsPath(), "utf8"));
 
   beforeEach(async () => {
     repo = await mkdtemp(path.join(os.tmpdir(), "teamroom-claude-hook-"));
@@ -57,7 +60,10 @@ describe("Claude Code hook install", () => {
     expect((await installClaudeHook(repo)).change).toBe("installed");
     const settings = await readSettings();
     expect(settings.hooks.PostToolUse).toEqual([
-      { matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks: [{ type: "command", command: claudeHookCommand(), timeout: 10 }] },
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit",
+        hooks: [{ type: "command", command: claudeHookCommand(), timeout: 10 }],
+      },
     ]);
   });
 
@@ -104,7 +110,10 @@ describe("claudeHookCommand", () => {
   });
 
   it("should prefer the CLI that installed it, quoting paths with spaces and quotes", () => {
-    const command = claudeHookCommand({ node: "/usr/bin/node", script: "/Users/o'neil/my apps/teamroom/dist/cli/index.js" });
+    const command = claudeHookCommand({
+      node: "/usr/bin/node",
+      script: "/Users/o'neil/my apps/teamroom/dist/cli/index.js",
+    });
     expect(command).toContain("'/Users/o'\\''neil/my apps/teamroom/dist/cli/index.js' claude-hook");
     expect(command.endsWith("|| true")).toBe(true);
   });

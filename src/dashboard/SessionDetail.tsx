@@ -1,6 +1,6 @@
 import { Box, Text } from "ink";
 import { formatAge } from "../client/workspace.js";
-import { sessionAgentLabel, type HotFile, type SessionSummary } from "./model.js";
+import { type HotFile, type SessionSummary, sessionAgentLabel } from "./model.js";
 import { COLORS, SYMBOLS } from "./theme.js";
 
 const MAX_FILES_SHOWN = 8;
@@ -29,7 +29,11 @@ export function SessionDetail({ session, hotFiles, now }: SessionDetailProps): R
     <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
       <Text>
         <Text bold>{session.member}</Text>
-        <Text dimColor> in {session.session ?? "no session"}{session.branch ? ` on ${session.branch}` : ""}</Text>
+        <Text dimColor>
+          {" "}
+          in {session.session ?? "no session"}
+          {session.branch ? ` on ${session.branch}` : ""}
+        </Text>
       </Text>
       <Text wrap="wrap">{session.doing}</Text>
       {session.files.length === 0 ? (
@@ -53,7 +57,11 @@ export function SessionDetail({ session, hotFiles, now }: SessionDetailProps): R
               </Text>
             );
           })}
-          {hidden > 0 && <Text dimColor>  and {hidden} more</Text>}
+          {hidden > 0 && (
+            <Text dimColor>
+              {"  "}and {hidden} more
+            </Text>
+          )}
         </Box>
       )}
     </Box>

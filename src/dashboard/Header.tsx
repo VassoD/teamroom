@@ -28,14 +28,21 @@ export function Header({ dashboard }: HeaderProps): React.JSX.Element {
   return (
     <Box justifyContent="space-between" paddingX={1}>
       <Text>
-        <Text bold color={COLORS.accent}>teamroom</Text>
-        <Text dimColor>  {dashboard.roomName}</Text>
+        <Text bold color={COLORS.accent}>
+          teamroom
+        </Text>
+        <Text dimColor>
+          {"  "}
+          {dashboard.roomName}
+        </Text>
       </Text>
       <Text>
-        <Text>{totals.members} {totals.members === 1 ? "person" : "people"}</Text>
-        <Text dimColor>   </Text>
+        <Text>
+          {totals.members} {totals.members === 1 ? "person" : "people"}
+        </Text>
+        <Text dimColor>{"   "}</Text>
         <Text color={COLORS.active}>{totals.activeSessions} working</Text>
-        <Text dimColor>   </Text>
+        <Text dimColor>{"   "}</Text>
         <Text color={COLORS.agent}>{plural(totals.activeAgents, "agent")} active</Text>
         {hasNamedAgents(totals.activeAgentsByLabel) && (
           <Text dimColor> ({describeBreakdown(totals.activeAgentsByLabel)})</Text>

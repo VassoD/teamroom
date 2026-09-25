@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { activitySchema, fileOverlapSchema, roomViewSchema, type PostActivityRequest } from "../core/schemas.js";
+import { activitySchema, fileOverlapSchema, type PostActivityRequest, roomViewSchema } from "../core/schemas.js";
 import type { Activity, FileOverlap, RoomView } from "../core/types.js";
 import { ApiError, NetworkError } from "./errors.js";
 

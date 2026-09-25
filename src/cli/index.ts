@@ -3,11 +3,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { ApiClient } from "../client/api-client.js";
-import { saveConfig } from "../client/config.js";
 import { installClaudeHook, parseClaudeEdit, uninstallClaudeHook } from "../client/claude-hook.js";
-import { UsageError, describeError } from "../client/errors.js";
+import { saveConfig } from "../client/config.js";
+import { describeError, UsageError } from "../client/errors.js";
 import { Git } from "../client/git.js";
-import { installHooks, uninstallHooks, type CliLocation } from "../client/hooks.js";
+import { type CliLocation, installHooks, uninstallHooks } from "../client/hooks.js";
 import {
   checkOverlap,
   formatAge,
@@ -56,12 +56,15 @@ type Command = (args: string[]) => Promise<number>;
 
 const commands: Record<string, Command> = {
   serve: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      port: { type: "string", default: String(DEFAULT_PORT) },
-      host: { type: "string", default: DEFAULT_HOST },
-      "data-dir": { type: "string", default: DEFAULT_DATA_DIR },
-      "trust-proxy": { type: "boolean", default: false },
-    } });
+    const { values } = parseArgs({
+      args,
+      options: {
+        port: { type: "string", default: String(DEFAULT_PORT) },
+        host: { type: "string", default: DEFAULT_HOST },
+        "data-dir": { type: "string", default: DEFAULT_DATA_DIR },
+        "trust-proxy": { type: "boolean", default: false },
+      },
+    });
     const port = Number(values.port);
     if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new UsageError("--port must be 1 to 65535.");
     startServer({ port, host: values.host, dataDir: values["data-dir"], trustProxy: values["trust-proxy"] });
@@ -71,32 +74,45 @@ const commands: Record<string, Command> = {
   },
 
   create: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      server: { type: "string" },
-      "room-name": { type: "string" },
-      name: { type: "string" },
-    } });
+    const { values } = parseArgs({
+      args,
+      options: {
+        server: { type: "string" },
+        "room-name": { type: "string" },
+        name: { type: "string" },
+      },
+    });
     const server = requireOption(values.server, "--server");
     const roomName = requireOption(values["room-name"], "--room-name");
     const name = requireOption(values.name, "--name");
     const commonDir = await new Git(process.cwd()).commonDir();
 
     const created = await new ApiClient({ server }).createRoom(roomName, name);
-    const file = await saveConfig(commonDir, { server, roomId: created.room.id, member: created.me, token: created.token });
+    const file = await saveConfig(commonDir, {
+      server,
+      roomId: created.room.id,
+      member: created.me,
+      token: created.token,
+    });
     print(`Created room "${created.room.name}" and saved your membership to ${file}.`);
     print("\nShare this with teammates (it lets anyone who has it join):");
-    print(`  teamroom join --server ${server} --room ${created.room.id} --invite ${created.inviteCode} --name <their name>`);
+    print(
+      `  teamroom join --server ${server} --room ${created.room.id} --invite ${created.inviteCode} --name <their name>`
+    );
     print("\nNext: `teamroom hooks install` so your commits and checkouts are reported automatically.");
     return EXIT_OK;
   },
 
   join: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      server: { type: "string" },
-      room: { type: "string" },
-      invite: { type: "string" },
-      name: { type: "string" },
-    } });
+    const { values } = parseArgs({
+      args,
+      options: {
+        server: { type: "string" },
+        room: { type: "string" },
+        invite: { type: "string" },
+        name: { type: "string" },
+      },
+    });
     const server = requireOption(values.server, "--server");
     const roomId = requireOption(values.room, "--room");
     const invite = requireOption(values.invite, "--invite");
@@ -104,25 +120,40 @@ const commands: Record<string, Command> = {
     const commonDir = await new Git(process.cwd()).commonDir();
 
     const joined = await new ApiClient({ server }).joinRoom(roomId, name, invite);
-    const file = await saveConfig(commonDir, { server, roomId: joined.room.id, member: joined.me, token: joined.token });
+    const file = await saveConfig(commonDir, {
+      server,
+      roomId: joined.room.id,
+      member: joined.me,
+      token: joined.token,
+    });
     print(`Joined "${joined.room.name}" as ${joined.me}. Membership saved to ${file}.`);
     print("Next: `teamroom hooks install` so your commits and checkouts are reported automatically.");
     return EXIT_OK;
   },
 
   hooks: async (args) => {
-    const { values, positionals } = parseArgs({ args, options: { claude: { type: "boolean", default: false } }, allowPositionals: true });
+    const { values, positionals } = parseArgs({
+      args,
+      options: { claude: { type: "boolean", default: false } },
+      allowPositionals: true,
+    });
     const [action] = positionals;
-    if (action !== "install" && action !== "uninstall") throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
+    if (action !== "install" && action !== "uninstall")
+      throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
     const git = new Git(process.cwd());
     const hooksDir = await git.hooksDir();
-    const changes = action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
+    const changes =
+      action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`${hook}: ${change}`);
     if (values.claude) {
       const repoRoot = await git.repoRoot();
-      const claude = action === "install" ? await installClaudeHook(repoRoot, await currentCli()) : await uninstallClaudeHook(repoRoot);
+      const claude =
+        action === "install"
+          ? await installClaudeHook(repoRoot, await currentCli())
+          : await uninstallClaudeHook(repoRoot);
       print(`Claude Code PostToolUse: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
-      if (action === "install" && claude.change === "installed") print("Restart Claude Code sessions in this repo to pick it up.");
+      if (action === "install" && claude.change === "installed")
+        print("Restart Claude Code sessions in this repo to pick it up.");
     }
     return EXIT_OK;
   },
@@ -141,7 +172,11 @@ const commands: Record<string, Command> = {
   },
 
   check: async (args) => {
-    const { values, positionals } = parseArgs({ args, options: { "since-hours": { type: "string" } }, allowPositionals: true });
+    const { values, positionals } = parseArgs({
+      args,
+      options: { "since-hours": { type: "string" } },
+      allowPositionals: true,
+    });
     const workspace = await openWorkspace(process.cwd());
     const check = await checkOverlap(workspace, {
       files: positionals,
@@ -156,11 +191,14 @@ const commands: Record<string, Command> = {
   },
 
   report: async (args) => {
-    const { values } = parseArgs({ args, options: {
-      note: { type: "string" },
-      source: { type: "string", default: "human" },
-      quiet: { type: "boolean", default: false },
-    } });
+    const { values } = parseArgs({
+      args,
+      options: {
+        note: { type: "string" },
+        source: { type: "string", default: "human" },
+        quiet: { type: "boolean", default: false },
+      },
+    });
     const source = ACTIVITY_SOURCES.find((candidate) => candidate === values.source);
     if (!source) throw new UsageError(`--source must be one of ${ACTIVITY_SOURCES.join(", ")}.`);
     const workspace = await openWorkspace(process.cwd());
@@ -192,7 +230,9 @@ const commands: Record<string, Command> = {
     const workspace = await openWorkspace(process.cwd());
     const { room, me } = await workspace.client.getRoom(workspace.config.roomId, limit);
     print(`${room.name} (${room.id}), you are ${me}, session ${workspace.session}`);
-    print(`Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`);
+    print(
+      `Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`
+    );
     if (room.activity.length === 0) {
       print("\nNo activity yet.");
       return EXIT_OK;

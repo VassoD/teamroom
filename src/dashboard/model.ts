@@ -160,7 +160,9 @@ export function buildDashboard(room: RoomView, me: string, now = new Date()): Da
       activeAgentsByLabel,
     },
     hotFiles: findHotFiles(sessions),
-    recent: [...room.activity].sort((first, second) => second.createdAt.localeCompare(first.createdAt)).slice(0, RECENT_ACTIVITY_SHOWN),
+    recent: [...room.activity]
+      .sort((first, second) => second.createdAt.localeCompare(first.createdAt))
+      .slice(0, RECENT_ACTIVITY_SHOWN),
   };
 }
 
