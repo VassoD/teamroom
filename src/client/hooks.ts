@@ -84,6 +84,14 @@ export async function uninstallHooks(hooksDir: string): Promise<Record<string, H
   return changes;
 }
 
+export async function installedHooks(hooksDir: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const name of HOOK_NAMES) {
+    if ((await readIfExists(path.join(hooksDir, name)))?.includes(BLOCK_START)) found.push(name);
+  }
+  return found;
+}
+
 export function removeBlock(content: string): string {
   const start = content.indexOf(BLOCK_START);
   const end = content.indexOf(BLOCK_END, start);

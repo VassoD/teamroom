@@ -202,6 +202,15 @@ describe("teamroom HTTP API", () => {
     });
   });
 
+  it("should answer an opened invite link with join instructions and no room data", async () => {
+    const response = await setup.app.request(`/join/${setup.roomId}`);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("teamroom join");
+    expect(body).not.toContain("Core");
+  });
+
   it("should rate limit room creation per client", async () => {
     const app = createApp({ store: new MemoryRoomStore(), rateLimits: { createRoom: { limit: 1, windowMs: 60_000 } } });
 

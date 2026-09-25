@@ -66,6 +66,10 @@ export class Git {
     return path.resolve(this.cwd, dir);
   }
 
+  async userName(): Promise<string | undefined> {
+    return (await this.optional(["config", "user.name"])) || undefined;
+  }
+
   async currentBranch(): Promise<string | undefined> {
     const branch = await this.optional(["symbolic-ref", "--quiet", "--short", "HEAD"]);
     return branch || undefined;

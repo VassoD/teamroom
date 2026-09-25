@@ -134,6 +134,22 @@ export function createApp({
 
   app.get("/health", (context) => context.json({ data: { status: "ok" } }));
 
+  // Invite links point here. The invite code is in the URL fragment, which
+  // browsers never send, so this page cannot and does not reveal anything.
+  app.get("/join/:roomId", (context) =>
+    context.text(
+      [
+        "You were invited to a teamroom.",
+        "",
+        "In the git repo you work on, run:",
+        "",
+        "  npx teamroom join '<paste the full invite link here>'",
+        "",
+        "Paste the whole link, including the part after #.",
+      ].join("\n")
+    )
+  );
+
   app.post("/v1/rooms", async (context) => {
     enforceRateLimit(createLimiter, `create:${getClientAddress(context)}`);
     const input = await parseBody(context, createRoomRequestSchema);
