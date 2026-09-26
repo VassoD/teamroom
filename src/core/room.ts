@@ -5,6 +5,8 @@ import type { Activity, Member, Room, RoomView } from "./types.js";
 
 export const MAX_ACTIVITY_KEPT = 1000;
 export const MAX_MEMBERS = 100;
+/** Activity entries returned when a reader does not ask for a specific number. */
+export const DEFAULT_ACTIVITY_LIMIT = 50;
 
 export interface NewRoomResult {
   room: Room;
