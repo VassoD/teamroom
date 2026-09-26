@@ -1,14 +1,18 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { z } from "zod";
 
 /**
- * Claude Code runs PostToolUse hooks after each tool call and writes a JSON
- * payload to the hook's stdin. teamroom only reads the fields it needs.
+ * Claude Code runs hooks at fixed points and writes a JSON payload to the
+ * hook's stdin. teamroom registers one command for three of them:
+ * - SessionStart: tell the new session what other sessions are changing.
+ * - PreToolUse on edits: pause an edit once when someone else is in that file.
+ * - PostToolUse on edits: share the edited file right away.
  * https://code.claude.com/docs/en/hooks
  */
 export const CLAUDE_EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"] as const;
 export const CLAUDE_HOOK_MATCHER = CLAUDE_EDIT_TOOLS.join("|");
+export const CLAUDE_HOOK_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse"] as const;
+export type ClaudeHookEvent = (typeof CLAUDE_HOOK_EVENTS)[number];
 export const CLAUDE_SETTINGS_FILE = path.join(".claude", "settings.local.json");
 const CLAUDE_HOOK_TIMEOUT_SECONDS = 10;
 const HOOK_MARKER = "teamroom claude-hook";
@@ -31,40 +35,6 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-const payloadSchema = z.object({
-  cwd: z.string().optional(),
-  tool_name: z.string(),
-  tool_input: z
-    .object({
-      file_path: z.string().optional(),
-      notebook_path: z.string().optional(),
-    })
-    .loose()
-    .optional(),
-});
-
-export interface ClaudeEdit {
-  cwd?: string;
-  tool: string;
-  file: string;
-}
-
-/** Returns the edited file from a PostToolUse payload, or null when the payload is not a file edit. */
-export function parseClaudeEdit(rawPayload: string): ClaudeEdit | null {
-  let json: unknown;
-  try {
-    json = JSON.parse(rawPayload);
-  } catch {
-    return null;
-  }
-  const parsed = payloadSchema.safeParse(json);
-  if (!parsed.success) return null;
-  const { cwd, tool_name: tool, tool_input: input } = parsed.data;
-  if (!(CLAUDE_EDIT_TOOLS as readonly string[]).includes(tool)) return null;
-  const file = input?.file_path ?? input?.notebook_path;
-  return file ? { cwd, tool, file } : null;
-}
-
 interface HookEntry {
   type?: string;
   command?: string;
@@ -77,7 +47,7 @@ interface MatcherGroup {
 }
 
 interface ClaudeSettings {
-  hooks?: Record<string, MatcherGroup[] | undefined> & { PostToolUse?: MatcherGroup[] };
+  hooks?: Record<string, MatcherGroup[] | undefined>;
   [key: string]: unknown;
 }
 
@@ -109,39 +79,61 @@ async function writeSettings(file: string, settings: ClaudeSettings): Promise<vo
   await fs.writeFile(file, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
+function wantedGroup(event: ClaudeHookEvent, command: string): MatcherGroup {
+  const hooks = [{ type: "command", command, timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }];
+  // SessionStart has no tool to match, so it runs for every session start.
+  return event === "SessionStart" ? { hooks } : { matcher: CLAUDE_HOOK_MATCHER, hooks };
+}
+
 /**
- * Adds the PostToolUse hook to `.claude/settings.local.json`, which Claude Code
+ * Adds the teamroom hooks to `.claude/settings.local.json`, which Claude Code
  * treats as personal and does not commit. Other settings and hooks are kept.
  */
-export async function installClaudeHook(
+export async function installClaudeHooks(
   repoRoot: string,
   cli?: { node: string; script: string }
 ): Promise<{ change: ClaudeHookChange; file: string }> {
   const file = path.join(repoRoot, CLAUDE_SETTINGS_FILE);
   const settings = await readSettings(file);
-  const groups = settings.hooks?.PostToolUse ?? [];
-  const wanted: MatcherGroup = {
-    matcher: CLAUDE_HOOK_MATCHER,
-    hooks: [{ type: "command", command: claudeHookCommand(cli), timeout: CLAUDE_HOOK_TIMEOUT_SECONDS }],
-  };
+  const command = claudeHookCommand(cli);
+  const hooks = { ...settings.hooks };
+  let changed = false;
 
-  const existing = groups.find(isTeamroomGroup);
-  if (existing && JSON.stringify(existing) === JSON.stringify(wanted)) return { change: "unchanged", file };
+  for (const event of CLAUDE_HOOK_EVENTS) {
+    const groups = hooks[event] ?? [];
+    const wanted = wantedGroup(event, command);
+    const existing = groups.filter(isTeamroomGroup);
+    if (existing.length === 1 && JSON.stringify(existing[0]) === JSON.stringify(wanted)) continue;
+    hooks[event] = [...groups.filter((group) => !isTeamroomGroup(group)), wanted];
+    changed = true;
+  }
 
-  settings.hooks = { ...settings.hooks, PostToolUse: [...groups.filter((group) => !isTeamroomGroup(group)), wanted] };
+  if (!changed) return { change: "unchanged", file };
+  settings.hooks = hooks;
   await writeSettings(file, settings);
   return { change: "installed", file };
 }
 
-export async function uninstallClaudeHook(repoRoot: string): Promise<{ change: ClaudeHookChange; file: string }> {
+export async function claudeHooksInstalled(repoRoot: string): Promise<ClaudeHookEvent[]> {
+  const settings = await readSettings(path.join(repoRoot, CLAUDE_SETTINGS_FILE)).catch(() => ({}) as ClaudeSettings);
+  return CLAUDE_HOOK_EVENTS.filter((event) => settings.hooks?.[event]?.some(isTeamroomGroup));
+}
+
+export async function uninstallClaudeHooks(repoRoot: string): Promise<{ change: ClaudeHookChange; file: string }> {
   const file = path.join(repoRoot, CLAUDE_SETTINGS_FILE);
   const settings = await readSettings(file);
-  const groups = settings.hooks?.PostToolUse ?? [];
-  if (!groups.some(isTeamroomGroup)) return { change: "absent", file };
+  const hooks: Record<string, MatcherGroup[] | undefined> = { ...settings.hooks };
+  let removed = false;
 
-  const remaining = groups.filter((group) => !isTeamroomGroup(group));
-  const { PostToolUse: _removed, ...otherEvents } = settings.hooks ?? {};
-  const hooks = remaining.length > 0 ? { ...otherEvents, PostToolUse: remaining } : otherEvents;
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!groups?.some(isTeamroomGroup)) continue;
+    removed = true;
+    const remaining = groups.filter((group) => !isTeamroomGroup(group));
+    if (remaining.length > 0) hooks[event] = remaining;
+    else delete hooks[event];
+  }
+
+  if (!removed) return { change: "absent", file };
   if (Object.keys(hooks).length > 0) settings.hooks = hooks;
   else delete settings.hooks;
   await writeSettings(file, settings);

@@ -2,7 +2,7 @@ import { ROOM_ID_PATTERN } from "../core/schemas.js";
 import { UsageError } from "./errors.js";
 
 const JOIN_SEGMENT = "/join/";
-const DEFAULT_SCHEME = "http://";
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]);
 
 export interface InviteLink {
   server: string;
@@ -12,11 +12,14 @@ export interface InviteLink {
 
 /**
  * Accepts `localhost:8787` or `https://teamroom.example.com/`, returns a URL
- * without a trailing slash so paths can be appended safely.
+ * without a trailing slash so paths can be appended safely. Without a scheme,
+ * local addresses get http and everything else https, so a token is never
+ * sent in the clear by accident.
  */
 export function normalizeServerUrl(input: string): string {
   const trimmed = input.trim();
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `${DEFAULT_SCHEME}${trimmed}`;
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+  const withScheme = hasScheme ? trimmed : `${defaultScheme(trimmed)}${trimmed}`;
   let url: URL;
   try {
     url = new URL(withScheme);
@@ -49,11 +52,24 @@ export function parseInviteLink(link: string): InviteLink {
   }
   const joinAt = url.pathname.lastIndexOf(JOIN_SEGMENT);
   const roomId = joinAt === -1 ? "" : url.pathname.slice(joinAt + JOIN_SEGMENT.length);
-  const inviteCode = decodeURIComponent(url.hash.slice(1));
+  const inviteCode = safeDecode(url.hash.slice(1));
   if (!ROOM_ID_PATTERN.test(roomId) || !inviteCode) throw invalid;
   return {
     server: normalizeServerUrl(`${url.origin}${url.pathname.slice(0, joinAt)}`),
     roomId,
     inviteCode,
   };
+}
+
+function defaultScheme(hostAndPort: string): string {
+  const hostname = hostAndPort.split("/")[0]?.replace(/:\d+$/, "").toLowerCase() ?? "";
+  return LOCAL_HOSTNAMES.has(hostname) ? "http://" : "https://";
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
 }

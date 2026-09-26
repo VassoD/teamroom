@@ -1,7 +1,7 @@
 {
   "name": "teamroom",
   "version": "0.1.0",
-  "description": "Know what your teammates (and their coding agents) are touching before the merge conflict does.",
+  "description": "Run coding agents in parallel without them stepping on each other's files. Works with Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe and any MCP agent.",
   "license": "MIT",
   "author": "Vasiliki Doropoulou",
   "type": "module",
@@ -23,7 +23,14 @@
     "model-context-protocol",
     "codex",
     "claude-code",
+    "cursor",
+    "gemini-cli",
+    "mistral-vibe",
     "coding-agents",
+    "parallel-agents",
+    "worktrees",
+    "vibe-coding",
+    "merge-conflicts",
     "collaboration"
   ],
   "scripts": {

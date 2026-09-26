@@ -6,8 +6,10 @@ const ROOM_ID = "room_AbCdEfGhIjKlMnOp";
 const INVITE = "tri_secret-Code_123";
 
 describe("normalizeServerUrl", () => {
-  it("should add http:// when the scheme is missing", () => {
+  it("should add http:// for local addresses and https:// for everything else when the scheme is missing", () => {
     expect(normalizeServerUrl("localhost:8787")).toBe("http://localhost:8787");
+    expect(normalizeServerUrl("127.0.0.1:8787")).toBe("http://127.0.0.1:8787");
+    expect(normalizeServerUrl("teamroom.example.com")).toBe("https://teamroom.example.com");
   });
 
   it("should drop trailing slashes but keep a path prefix", () => {

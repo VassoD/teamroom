@@ -107,6 +107,26 @@ describe("findOverlaps", () => {
     ]);
   });
 
+  it("should drop an agent's edit once a newer snapshot from its session replaces it", () => {
+    const activity = [
+      entry({ member: "bo", session: "s1", kind: "edit", source: "agent", files: ["a.ts"], createdAt: hoursAgo(3) }),
+      entry({ member: "bo", session: "s1", kind: "wip", files: [], createdAt: hoursAgo(2) }),
+    ];
+
+    expect(findOverlaps({ activity, files: ["a.ts"], member: "ada", now: NOW })).toEqual([]);
+  });
+
+  it("should keep an agent's edit that is newer than its session's snapshot", () => {
+    const activity = [
+      entry({ member: "bo", session: "s1", kind: "wip", files: [], createdAt: hoursAgo(2) }),
+      entry({ member: "bo", session: "s1", kind: "edit", source: "agent", files: ["a.ts"], createdAt: hoursAgo(1) }),
+    ];
+
+    expect(findOverlaps({ activity, files: ["a.ts"], member: "ada", now: NOW })[0]?.touchedBy).toEqual([
+      expect.objectContaining({ kind: "edit", session: "s1" }),
+    ]);
+  });
+
   it("should match paths regardless of ./ prefixes and backslashes", () => {
     const activity = [entry({ member: "bo", files: ["src\\auth.ts"], createdAt: hoursAgo(1) })];
 

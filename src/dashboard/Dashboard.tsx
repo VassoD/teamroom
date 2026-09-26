@@ -16,17 +16,18 @@ interface DashboardProps {
   pollIntervalMs?: number;
   /** Frozen time for tests and screenshots. */
   fixedNow?: Date;
+  isIgnored?: (file: string) => boolean;
 }
 
-export function DashboardApp({ fetchRoom, pollIntervalMs, fixedNow }: DashboardProps): React.JSX.Element {
+export function DashboardApp({ fetchRoom, pollIntervalMs, fixedNow, isIgnored }: DashboardProps): React.JSX.Element {
   const { exit } = useApp();
   const { snapshot, error, lastUpdated, refresh } = useRoomPolling(fetchRoom, pollIntervalMs);
   const [selectedKey, setSelectedKey] = useState<string>();
   const now = useClock(fixedNow);
   // Rebuilt on every clock tick too, so sessions turn idle on time between polls.
   const dashboard = useMemo(
-    () => (snapshot ? buildDashboard(snapshot.room, snapshot.me, now) : undefined),
-    [snapshot, now]
+    () => (snapshot ? buildDashboard(snapshot.room, snapshot.me, now, isIgnored) : undefined),
+    [snapshot, now, isIgnored]
   );
 
   const sessions = useMemo(() => (dashboard ? flattenSessions(dashboard) : []), [dashboard]);
@@ -53,7 +54,7 @@ export function DashboardApp({ fetchRoom, pollIntervalMs, fixedNow }: DashboardP
   if (!dashboard) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text dimColor>{error ? `Can't reach the room: ${error}` : "Connecting to the room…"}</Text>
+        <Text dimColor>{error ? `Can't read the room: ${error}` : "Loading the room…"}</Text>
         <Text dimColor>q quit</Text>
       </Box>
     );

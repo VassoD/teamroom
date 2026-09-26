@@ -62,7 +62,7 @@ export class FileRoomStore implements RoomStore {
     const target = this.roomPath(room.id);
     const temp = `${target}.${process.pid}.tmp`;
     await fs.mkdir(this.dataDir, { recursive: true });
-    await fs.writeFile(temp, JSON.stringify(room, null, 2), { encoding: "utf8", mode: 0o600 });
+    await fs.writeFile(temp, JSON.stringify(room), { encoding: "utf8", mode: 0o600 });
     await fs.rename(temp, target);
   }
 

@@ -76,3 +76,28 @@ describe("MCP handler", () => {
     expect(await handler.handle(request(7, "tools/call", { name: "nope" }))).toMatchObject({ error: { code: -32602 } });
   });
 });
+
+describe("MCP heads-up", () => {
+  it("should put a queued heads-up in front of the next tool result, once", async () => {
+    const workspace = {
+      backend: { getRoom: async () => ({ room: { activity: [] }, me: "ada" }) },
+    } as unknown as Workspace;
+    const queue = ["Heads up: bo is changing src/auth.ts"];
+    const handler = createMcpHandler(async () => workspace, { takeHeadsUp: () => queue.shift() });
+    const call = (id: number): string => request(id, "tools/call", { name: "teamroom_recent_activity", arguments: {} });
+
+    const first = JSON.stringify(await handler.handle(call(1)));
+    const second = JSON.stringify(await handler.handle(call(2)));
+
+    expect(first).toContain("Heads up: bo is changing src/auth.ts");
+    expect(first).toContain("No activity yet.");
+    expect(second).not.toContain("Heads up");
+  });
+
+  it("should remember the agent name from initialize", async () => {
+    const handler = createMcpHandler(notJoined);
+    await handler.handle(request(1, "initialize", { clientInfo: { name: "codex-mcp-client" } }));
+
+    expect(handler.client.agent).toBe("codex");
+  });
+});

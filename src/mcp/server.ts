@@ -6,6 +6,7 @@ import { agentLabel, normalizeAgentId } from "../core/agents.js";
 import { MAX_ACTIVITY_KEPT } from "../core/room.js";
 import { MAX_OVERLAP_WINDOW_HOURS, MAX_TEXT_LENGTH } from "../core/schemas.js";
 import { PACKAGE_VERSION } from "../version.js";
+import { AutoReporter } from "./auto-report.js";
 
 /**
  * A minimal MCP server over stdio (newline-delimited JSON-RPC 2.0). Teamroom
@@ -63,8 +64,8 @@ const TOOLS = [
   defineTool({
     name: "teamroom_check_overlap",
     description:
-      "Before editing files, ask whether teammates or other agents are changing them right now. " +
-      "Leave `files` empty to check everything this checkout has changed.",
+      "Before editing files, ask whether other agents (in other worktrees or on teammates' machines) are changing them right now. " +
+      "Leave `files` empty to check everything this checkout has changed. If someone is, tell the user before continuing.",
     input: z.object({
       files: z.array(z.string()).optional().describe("Paths relative to the repo root, or absolute."),
       sinceHours: z.number().int().positive().max(MAX_OVERLAP_WINDOW_HOURS).optional(),
@@ -78,8 +79,8 @@ const TOOLS = [
   defineTool({
     name: "teamroom_report_work",
     description:
-      "Share which files this checkout is changing, so teammates and their agents see it. " +
-      "Call after starting or finishing a chunk of edits. Replaces this session's previous report.",
+      "Share which files this checkout is changing, so other agents see it. Git hooks already do this on commit and checkout; " +
+      "call it after a chunk of edits you have not committed. Replaces this session's previous report.",
     input: z.object({
       note: z.string().max(MAX_TEXT_LENGTH).optional().describe("One line on what you are doing and why."),
     }),
@@ -96,11 +97,11 @@ const TOOLS = [
   defineTool({
     name: "teamroom_post_note",
     description:
-      "Announce an intent before acting on it, such as 'about to rename the User model'. " +
-      "Mention the files it will affect so overlap checks pick it up.",
+      "Announce your plan when you start a task, before editing, such as 'renaming the User model to Account'. " +
+      "List the files you expect to touch: other agents are warned before they edit them.",
     input: z.object({
-      text: z.string().min(1).max(MAX_TEXT_LENGTH),
-      files: z.array(z.string()).optional(),
+      text: z.string().min(1).max(MAX_TEXT_LENGTH).describe("One or two lines: what you are about to do and why."),
+      files: z.array(z.string()).optional().describe("Files you expect to change, relative to the repo root."),
     }),
     run: async (workspace, input, client) => {
       await postNote(workspace, { text: input.text, files: input.files, source: "agent", agent: client.agent });
@@ -109,12 +110,12 @@ const TOOLS = [
   }),
   defineTool({
     name: "teamroom_recent_activity",
-    description: "List what the team has been doing recently, newest first.",
+    description: "List what other sessions and agents have been doing recently, newest first.",
     input: z.object({
       limit: z.number().int().min(1).max(MAX_ACTIVITY_KEPT).optional(),
     }),
     run: async (workspace, input) => {
-      const { room } = await workspace.client.getRoom(workspace.config.roomId, input.limit ?? DEFAULT_RECENT_LIMIT);
+      const { room } = await workspace.backend.getRoom(input.limit ?? DEFAULT_RECENT_LIMIT);
       if (room.activity.length === 0) return "No activity yet.";
       return [...room.activity]
         .reverse()
@@ -134,15 +135,23 @@ type JsonRpcResponse =
 
 export interface McpHandler {
   handle(message: string): Promise<JsonRpcResponse | undefined>;
+  /** Filled in by `initialize`, so background reports carry the agent's name. */
+  readonly client: ClientContext;
+}
+
+export interface McpHandlerOptions {
+  /** A warning to put in front of the next tool result, taken once. */
+  takeHeadsUp?: () => string | undefined;
 }
 
 /**
  * The workspace is opened lazily so the server still starts, and can explain
- * the problem through a tool result, when the repo has not joined a room yet.
+ * the problem through a tool result, when the repo is not usable (not a git repo, broken config).
  */
-export function createMcpHandler(getWorkspace: () => Promise<Workspace>): McpHandler {
+export function createMcpHandler(getWorkspace: () => Promise<Workspace>, options: McpHandlerOptions = {}): McpHandler {
   const client: ClientContext = {};
   return {
+    client,
     async handle(message) {
       let raw: unknown;
       try {
@@ -178,7 +187,7 @@ export function createMcpHandler(getWorkspace: () => Promise<Workspace>): McpHan
             })),
           });
         case "tools/call":
-          return callTool(id, params, getWorkspace, client);
+          return callTool(id, params, getWorkspace, client, options.takeHeadsUp);
         default:
           return errorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method ${method} is not supported.`);
       }
@@ -190,7 +199,8 @@ async function callTool(
   id: string | number,
   params: unknown,
   getWorkspace: () => Promise<Workspace>,
-  client: ClientContext
+  client: ClientContext,
+  takeHeadsUp: (() => string | undefined) | undefined
 ): Promise<JsonRpcResponse> {
   const call = toolCallParamsSchema.safeParse(params);
   if (!call.success) return errorResponse(id, JSON_RPC_INVALID_PARAMS, "tools/call needs a tool name.");
@@ -206,7 +216,10 @@ async function callTool(
   try {
     const workspace = await getWorkspace();
     const text = await tool.run(workspace, input.data, client);
-    return result(id, { content: [{ type: "text", text }] } satisfies ToolResult);
+    const headsUp = takeHeadsUp?.();
+    return result(id, {
+      content: [{ type: "text", text: headsUp ? `${headsUp}\n\n${text}` : text }],
+    } satisfies ToolResult);
   } catch (error) {
     // Tool failures go back to the model as results, so it can tell the user or carry on.
     return result(id, toolError(describeError(error)));
@@ -233,16 +246,21 @@ function errorResponse(id: string | number | null, code: number, message: string
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
-/** Stdout carries protocol messages only, so diagnostics go to stderr. */
-export async function runMcpServer(getWorkspace: () => Promise<Workspace>): Promise<void> {
-  let cached: Promise<Workspace> | undefined;
-  const handler = createMcpHandler(() => {
-    cached ??= getWorkspace().catch((error: unknown) => {
-      cached = undefined;
-      throw error;
-    });
-    return cached;
-  });
+/**
+ * Stdout carries protocol messages only, so diagnostics go to stderr. The
+ * workspace is reopened on every call (a few milliseconds), so a join, leave
+ * or token rotation takes effect without restarting the agent.
+ */
+export async function runMcpServer(
+  getWorkspace: () => Promise<Workspace>,
+  options: { autoReport: boolean } = { autoReport: true }
+): Promise<void> {
+  const handler = createMcpHandler(getWorkspace, { takeHeadsUp: () => reporter.takeHeadsUp() });
+  // Shares the handler's client context, so reports carry the agent name learned on initialize.
+  const reporter = new AutoReporter(getWorkspace, handler.client, (message) =>
+    process.stderr.write(`teamroom mcp: ${message}\n`)
+  );
+  const stop = options.autoReport ? reporter.start() : () => undefined;
 
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of lines) {
@@ -254,4 +272,5 @@ export async function runMcpServer(getWorkspace: () => Promise<Workspace>): Prom
       process.stderr.write(`teamroom mcp: ${describeError(error)}\n`);
     }
   }
+  stop();
 }

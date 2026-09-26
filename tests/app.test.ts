@@ -222,3 +222,29 @@ describe("teamroom HTTP API", () => {
     expect(second.json.error?.code).toBe("RATE_LIMIT_EXCEEDED");
   });
 });
+
+describe("request body limit", () => {
+  it("should reject an oversized body sent without Content-Length before reading all of it", async () => {
+    const app = createApp({ store: new MemoryRoomStore() });
+    const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
+    let chunksPulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunksPulled += 1;
+        if (chunksPulled > 100) controller.close();
+        else controller.enqueue(chunk);
+      },
+    });
+
+    const response = await app.request("/v1/rooms", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      duplex: "half",
+    } as RequestInit);
+
+    expect(response.status).toBe(413);
+    expect(((await response.json()) as Envelope).error?.code).toBe("PAYLOAD_TOO_LARGE");
+    expect(chunksPulled).toBeLessThan(100);
+  });
+});

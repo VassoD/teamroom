@@ -1,33 +1,99 @@
+import os from "node:os";
 import path from "node:path";
 import { agentLabel } from "../core/agents.js";
 import { normalizePath } from "../core/overlap.js";
-import { MAX_FILES_PER_ACTIVITY, MAX_TEXT_LENGTH } from "../core/schemas.js";
+import { MAX_FILES_PER_ACTIVITY, MAX_NAME_LENGTH, MAX_TEXT_LENGTH, memberNameSchema } from "../core/schemas.js";
 import type { Activity, ActivitySource, FileOverlap } from "../core/types.js";
 import { ApiClient } from "./api-client.js";
+import { type BackendMode, LocalBackend, type RoomBackend, SharedBackend } from "./backend.js";
 import { ENV, loadConfig, type TeamroomConfig } from "./config.js";
-import { Git, sessionForRepoRoot } from "./git.js";
+import { ConfigError } from "./errors.js";
+import { Git, sessionForRepoRoot, type WorkingState } from "./git.js";
+import { type IgnoreMatcher, loadIgnore } from "./ignore.js";
+
+const FALLBACK_MEMBER_NAME = "me";
 
 export interface Workspace {
   cwd: string;
   repoRoot: string;
+  commonDir: string;
   git: Git;
   session: string;
-  config: TeamroomConfig;
-  client: ApiClient;
+  member: string;
+  mode: BackendMode;
+  backend: RoomBackend;
+  /** Set only in shared mode. */
+  config?: TeamroomConfig;
+  /** Files whose overlap is noise, such as lockfiles. */
+  isIgnored: IgnoreMatcher;
 }
 
-export async function openWorkspace(cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<Workspace> {
+export interface OpenWorkspaceOptions {
+  env?: NodeJS.ProcessEnv;
+  /** Hooks that run inline with an agent keep this short, so a slow server never stalls an edit. */
+  timeoutMs?: number;
+  maxAttempts?: number;
+}
+
+/** Shared mode when the repo joined a room, local mode otherwise. Local mode needs no setup at all. */
+export async function openWorkspace(cwd: string, options: OpenWorkspaceOptions = {}): Promise<Workspace> {
+  const env = options.env ?? process.env;
   const git = new Git(cwd);
   const [repoRoot, commonDir] = await Promise.all([git.repoRoot(), git.commonDir()]);
-  const config = await loadConfig(commonDir, env);
+  const [config, isIgnored] = await Promise.all([loadConfig(commonDir, env), loadIgnore(repoRoot)]);
+  const rootGit = new Git(repoRoot);
+  const member = config?.member ?? (await defaultMemberName(rootGit, env[ENV.member]));
+  const backend: RoomBackend = config
+    ? new SharedBackend(
+        new ApiClient({
+          server: config.server,
+          token: config.token,
+          timeoutMs: options.timeoutMs,
+          maxAttempts: options.maxAttempts,
+        }),
+        config.roomId
+      )
+    : new LocalBackend(commonDir, member, path.basename(repoRoot));
   return {
     cwd,
     repoRoot,
-    git: new Git(repoRoot),
+    commonDir,
+    git: rootGit,
     session: env[ENV.session] ?? sessionForRepoRoot(repoRoot),
+    member,
+    mode: backend.mode,
+    backend,
     config,
-    client: new ApiClient({ server: config.server, token: config.token }),
+    isIgnored,
   };
+}
+
+/** Room admin only makes sense for a shared room. */
+export function requireShared(workspace: Workspace): TeamroomConfig {
+  if (!workspace.config) {
+    throw new ConfigError(
+      "This repo is in local mode, which has no invites or members to manage. Share it with `teamroom create --server <url>` first."
+    );
+  }
+  return workspace.config;
+}
+
+/** An explicit name, else git's user.name, else the OS user, cleaned up to be a valid member name. */
+export async function defaultMemberName(git: Git, explicit?: string): Promise<string> {
+  const candidates = [explicit, await git.userName(), safeOsUserName()];
+  for (const candidate of candidates) {
+    const cleaned = candidate?.replace(/@/g, "").trim().slice(0, MAX_NAME_LENGTH);
+    if (cleaned && memberNameSchema.safeParse(cleaned).success) return cleaned;
+  }
+  return FALLBACK_MEMBER_NAME;
+}
+
+function safeOsUserName(): string | undefined {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface ReportResult {
@@ -42,12 +108,12 @@ export interface ReportResult {
  */
 export async function reportWork(
   workspace: Workspace,
-  options: { source: ActivitySource; note?: string; agent?: string }
+  options: { source: ActivitySource; note?: string; agent?: string; state?: WorkingState }
 ): Promise<ReportResult> {
-  const state = await workspace.git.workingState();
+  const state = options.state ?? (await workspace.git.workingState());
   const files = state.files.slice(0, MAX_FILES_PER_ACTIVITY);
   const omittedFiles = state.files.length - files.length;
-  const activity = await workspace.client.postActivity(workspace.config.roomId, {
+  const activity = await workspace.backend.postActivity({
     kind: "wip",
     source: options.source,
     agent: options.agent,
@@ -65,7 +131,7 @@ export async function postNote(
   options: { text: string; files?: string[]; source: ActivitySource; agent?: string }
 ): Promise<Activity> {
   const [branch, commit] = await Promise.all([workspace.git.currentBranch(), workspace.git.headCommit()]);
-  return workspace.client.postActivity(workspace.config.roomId, {
+  return workspace.backend.postActivity({
     kind: "note",
     source: options.source,
     agent: options.agent,
@@ -86,9 +152,9 @@ export async function reportEdit(
   options: { file: string; agent: string }
 ): Promise<Activity | null> {
   const file = toRepoPath(workspace, options.file);
-  if (file === "" || file.startsWith("../") || path.isAbsolute(file)) return null;
+  if (isOutsideRepo(file)) return null;
   const [branch, commit] = await Promise.all([workspace.git.currentBranch(), workspace.git.headCommit()]);
-  return workspace.client.postActivity(workspace.config.roomId, {
+  return workspace.backend.postActivity({
     kind: "edit",
     source: "agent",
     agent: options.agent,
@@ -107,63 +173,36 @@ export interface OverlapCheck {
 
 /**
  * Asks who else is touching `files` (default: everything this checkout has
- * changed). Commit entries already merged into the default branch are dropped,
- * since they can no longer conflict.
+ * changed). Ignored files, such as lockfiles, are left out of the question.
  */
 export async function checkOverlap(
   workspace: Workspace,
-  options: { files?: string[]; sinceHours?: number } = {}
+  options: { files?: string[]; sinceHours?: number; state?: WorkingState } = {}
 ): Promise<OverlapCheck> {
-  const files =
+  const requested =
     options.files && options.files.length > 0
       ? [...new Set(options.files.map((file) => toRepoPath(workspace, file)))]
-      : (await workspace.git.workingState()).files;
+      : (options.state ?? (await workspace.git.workingState())).files;
+  const files = requested.filter((file) => !isOutsideRepo(file) && !workspace.isIgnored(file));
   if (files.length === 0) return { files, overlaps: [] };
 
   const batches = chunk(files, MAX_FILES_PER_ACTIVITY);
   const results = await Promise.all(
     batches.map((batch) =>
-      workspace.client.findOverlaps(workspace.config.roomId, {
-        files: batch,
-        session: workspace.session,
-        sinceHours: options.sinceHours,
-      })
+      workspace.backend.findOverlaps({ files: batch, session: workspace.session, sinceHours: options.sinceHours })
     )
   );
-  const overlaps = await dropMergedCommits(workspace.git, results.flat());
-  return { files, overlaps };
-}
-
-async function dropMergedCommits(git: Git, overlaps: FileOverlap[]): Promise<FileOverlap[]> {
-  const baseRef = await git.defaultBranchRef();
-  if (!baseRef) return overlaps;
-
-  const commits = new Set(
-    overlaps.flatMap((overlap) =>
-      overlap.touchedBy.filter((touch) => touch.kind === "commit" && touch.commit).map((touch) => touch.commit ?? "")
-    )
-  );
-  const merged = new Set<string>();
-  await Promise.all(
-    [...commits].map(async (commit) => {
-      if (await git.isMergedInto(commit, baseRef)) merged.add(commit);
-    })
-  );
-
-  return overlaps
-    .map((overlap) => ({
-      ...overlap,
-      touchedBy: overlap.touchedBy.filter(
-        (touch) => !(touch.kind === "commit" && touch.commit && merged.has(touch.commit))
-      ),
-    }))
-    .filter((overlap) => overlap.touchedBy.length > 0);
+  return { files, overlaps: results.flat() };
 }
 
 /** Accepts absolute paths or paths relative to the cwd, returns a path relative to the repo root. */
 export function toRepoPath(workspace: Pick<Workspace, "cwd" | "repoRoot">, file: string): string {
   const absolute = path.resolve(workspace.cwd, file);
   return normalizePath(path.relative(workspace.repoRoot, absolute));
+}
+
+export function isOutsideRepo(repoPath: string): boolean {
+  return repoPath === "" || repoPath === ".." || repoPath.startsWith("../") || path.isAbsolute(repoPath);
 }
 
 export function formatOverlaps(overlaps: FileOverlap[]): string {

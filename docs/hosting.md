@@ -1,6 +1,8 @@
 # Hosting a teamroom server
 
-Everyone on a team runs the `teamroom` CLI on their own machine. Only the room server is shared. It is one small Node process that stores rooms as JSON files.
+You only need a server for team mode. Parallel agents on one machine coordinate through `.git/teamroom/` with no server at all (`teamroom init`).
+
+In team mode, everyone runs the `teamroom` CLI and their agents on their own machine. Only the room server is shared. It is one small Node process that stores rooms as JSON files.
 
 ## What the server needs
 

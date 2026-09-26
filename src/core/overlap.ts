@@ -17,8 +17,9 @@ interface FindOverlapsInput {
  * For each requested file, lists the other sessions that touched it recently,
  * keeping only each session's latest touch so the answer stays short.
  *
- * A `wip` snapshot replaces the earlier snapshots of its session, so files a
- * session has since merged or reverted stop showing up as overlap.
+ * A `wip` snapshot replaces the earlier snapshots and agent edits of its
+ * session, so files a session has since merged or reverted stop showing up as
+ * overlap. Edits newer than the snapshot still count: the agent is mid-task.
  */
 export function findOverlaps({
   activity,
@@ -30,12 +31,12 @@ export function findOverlaps({
 }: FindOverlapsInput): FileOverlap[] {
   const cutoff = now.getTime() - sinceHours * MS_PER_HOUR;
   const wanted = new Set(files.map(normalizePath));
-  const currentSnapshots = latestSnapshotIds(activity);
+  const latestSnapshots = latestSnapshotBySession(activity);
   const latestTouch = new Map<string, Map<string, OverlapTouch>>();
 
   for (const entry of activity) {
     if (isCaller(entry, member, session)) continue;
-    if (entry.kind === "wip" && !currentSnapshots.has(entry.id)) continue;
+    if (isSuperseded(entry, latestSnapshots.get(sessionKey(entry)))) continue;
     const at = Date.parse(entry.createdAt);
     if (Number.isNaN(at) || at < cutoff) continue;
 
@@ -83,7 +84,14 @@ function sessionKey(entry: Activity): string {
   return `${entry.member}\u0000${entry.session ?? ""}`;
 }
 
-function latestSnapshotIds(activity: Activity[]): Set<string> {
+function isSuperseded(entry: Activity, latestSnapshot: Activity | undefined): boolean {
+  if (!latestSnapshot) return false;
+  if (entry.kind === "wip") return entry.id !== latestSnapshot.id;
+  if (entry.kind === "edit") return entry.createdAt < latestSnapshot.createdAt;
+  return false;
+}
+
+function latestSnapshotBySession(activity: Activity[]): Map<string, Activity> {
   const latestBySession = new Map<string, Activity>();
   for (const entry of activity) {
     if (entry.kind !== "wip") continue;
@@ -91,5 +99,5 @@ function latestSnapshotIds(activity: Activity[]): Set<string> {
     const previous = latestBySession.get(key);
     if (!previous || previous.createdAt <= entry.createdAt) latestBySession.set(key, entry);
   }
-  return new Set([...latestBySession.values()].map((entry) => entry.id));
+  return latestBySession;
 }

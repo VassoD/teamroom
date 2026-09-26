@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
 import { findOverlaps } from "../core/overlap.js";
@@ -7,6 +8,7 @@ import {
   addMember,
   appendActivity,
   createRoom,
+  DEFAULT_ACTIVITY_LIMIT,
   findMemberByToken,
   inviteCodeIsValid,
   MAX_ACTIVITY_KEPT,
@@ -29,7 +31,6 @@ import { RoomNotFoundError, type RoomStore, StoreLockTimeoutError } from "../sto
 import { type Logger, silentLogger } from "./logger.js";
 import { RateLimiter, type RateLimitRule } from "./rate-limit.js";
 
-const DEFAULT_ACTIVITY_LIMIT = 50;
 const MAX_BODY_BYTES = 128 * 1024;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -143,6 +144,21 @@ export function createApp({
     });
     return errorResponse(context, 500, "INTERNAL_ERROR", "Something went wrong on the server.");
   });
+
+  // Enforced while the body streams in, so a request without Content-Length cannot make the server buffer it all.
+  app.use(
+    "/v1/*",
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (context) =>
+        errorResponse(
+          context as AppContext,
+          413,
+          "PAYLOAD_TOO_LARGE",
+          `Request bodies are limited to ${MAX_BODY_BYTES} bytes.`
+        ),
+    })
+  );
 
   app.notFound((context) => errorResponse(context, 404, "NOT_FOUND", "No route matches this request."));
 
@@ -341,14 +357,7 @@ function parseRoomId(context: AppContext): string {
 }
 
 async function parseBody<Schema extends z.ZodType>(context: AppContext, schema: Schema): Promise<z.output<Schema>> {
-  const declaredLength = Number(context.req.header("content-length") ?? "0");
-  if (declaredLength > MAX_BODY_BYTES) {
-    throw new HttpError(413, "PAYLOAD_TOO_LARGE", `Request bodies are limited to ${MAX_BODY_BYTES} bytes.`);
-  }
   const raw = await context.req.text();
-  if (raw.length > MAX_BODY_BYTES) {
-    throw new HttpError(413, "PAYLOAD_TOO_LARGE", `Request bodies are limited to ${MAX_BODY_BYTES} bytes.`);
-  }
 
   let body: unknown;
   try {
