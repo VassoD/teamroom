@@ -1,0 +1,35 @@
+# Fly.io config for the teamroom room server.
+# `fly launch --copy-config --no-deploy` fills in the app name; see docs/hosting.md.
+
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TEAMROOM_TRUST_PROXY = "true"
+
+# Rooms live on this volume. One volume means one machine: do not scale out.
+[mounts]
+  source = "teamroom_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # Idle machines stop and wake on the next request (about a second), which
+  # keeps a quiet server nearly free. Set min_machines_running = 1 to avoid it.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
