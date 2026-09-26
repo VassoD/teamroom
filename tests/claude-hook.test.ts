@@ -4,10 +4,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseClaudeHookPayload } from "../src/client/claude-events.js";
 import {
+  CLAUDE_ALLOWED_TOOLS,
   CLAUDE_SETTINGS_FILE,
   claudeHookCommand,
   claudeHooksInstalled,
+  claudeHooksWanted,
   installClaudeHooks,
+  rememberClaudeHooksWanted,
   uninstallClaudeHooks,
 } from "../src/client/claude-hook.js";
 
@@ -128,11 +131,29 @@ describe("Claude Code hook install", () => {
 
     await installClaudeHooks(repo);
     const settings = await readSettings();
-    expect(settings.permissions).toEqual(existing.permissions);
+    expect(settings.permissions).toEqual({ allow: ["Bash(npm test)", ...CLAUDE_ALLOWED_TOOLS] });
     expect(settings.hooks.PostToolUse).toHaveLength(2);
 
     await uninstallClaudeHooks(repo);
     expect(await readSettings()).toEqual(existing);
+  });
+
+  it("should pre-approve teamroom's own tools, once", async () => {
+    await installClaudeHooks(repo);
+    await installClaudeHooks(repo);
+
+    expect((await readSettings()).permissions).toEqual({ allow: CLAUDE_ALLOWED_TOOLS });
+  });
+
+  it("should remember across worktrees whether the repo wants Claude Code hooks", async () => {
+    const storeDir = path.join(repo, ".git", "teamroom");
+    expect(await claudeHooksWanted(storeDir)).toBe(false);
+
+    await rememberClaudeHooksWanted(storeDir, true);
+    expect(await claudeHooksWanted(storeDir)).toBe(true);
+
+    await rememberClaudeHooksWanted(storeDir, false);
+    expect(await claudeHooksWanted(storeDir)).toBe(false);
   });
 
   it("should refuse to overwrite a settings file it cannot parse", async () => {

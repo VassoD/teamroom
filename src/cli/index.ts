@@ -4,8 +4,16 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { installAgentsMd } from "../client/agents-md.js";
 import { ApiClient } from "../client/api-client.js";
+import { localStoreDir } from "../client/backend.js";
 import { handleClaudeHook, parseClaudeHookPayload } from "../client/claude-events.js";
-import { installClaudeHooks, uninstallClaudeHooks } from "../client/claude-hook.js";
+import {
+  CLAUDE_HOOK_EVENTS,
+  claudeHooksInstalled,
+  claudeHooksWanted,
+  installClaudeHooks,
+  rememberClaudeHooksWanted,
+  uninstallClaudeHooks,
+} from "../client/claude-hook.js";
 import { ENV, removeConfig, saveConfig } from "../client/config.js";
 import { formatDoctor, runDoctor } from "../client/doctor.js";
 import { describeError, UsageError } from "../client/errors.js";
@@ -30,6 +38,7 @@ import {
   postNote,
   reportWork,
   requireShared,
+  type Workspace,
 } from "../client/workspace.js";
 import { runMcpServer } from "../mcp/server.js";
 import {
@@ -278,12 +287,13 @@ const commands: Record<string, Command> = {
     if (action !== "install" && action !== "uninstall")
       throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
     const git = new Git(process.cwd());
-    const [hooksDir, repoRoot] = await Promise.all([git.hooksDir(), git.repoRoot()]);
+    const [hooksDir, repoRoot, commonDir] = await Promise.all([git.hooksDir(), git.repoRoot(), git.commonDir()]);
     const cli = await currentCli();
     const changes = action === "install" ? await installHooks(hooksDir, cli) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`git ${hook}: ${change}`);
     const claude =
       action === "install" ? await installClaudeHooks(repoRoot, cli) : await uninstallClaudeHooks(repoRoot);
+    await rememberClaudeHooksWanted(localStoreDir(commonDir), action === "install");
     print(`Claude Code hooks: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
     if (action === "install" && claude.change === "installed") {
       print("Restart Claude Code sessions in this repo to pick them up.");
@@ -339,6 +349,7 @@ const commands: Record<string, Command> = {
     const source = ACTIVITY_SOURCES.find((candidate) => candidate === values.source);
     if (!source) throw new UsageError(`--source must be one of ${ACTIVITY_SOURCES.join(", ")}.`);
     const workspace = await openWorkspace(process.cwd());
+    if (source === "hook") await adoptClaudeHooks(workspace);
     const { activity, omittedFiles } = await reportWork(workspace, { source, note: values.note });
     if (!values.quiet) {
       const omitted = omittedFiles > 0 ? `, ${omittedFiles} left out (over the limit)` : "";
@@ -447,10 +458,27 @@ async function setUp(git: Git, repoRoot: string, steps: SetupSteps): Promise<voi
   }
   if (steps.claudeHooks) {
     const { change } = await installClaudeHooks(repoRoot, cli);
+    await rememberClaudeHooksWanted(localStoreDir(await git.commonDir()), true);
     print(
       `Claude Code hooks (${change}): sessions are briefed on the others, and an edit to a file another session is changing is paused once with the details.`
     );
     if (change === "installed") print("  Restart Claude Code sessions in this repo to pick them up.");
+  }
+}
+
+/**
+ * `.claude/settings.local.json` is not committed, so a worktree created after
+ * `init` would start without the Claude Code hooks. `git worktree add` runs
+ * the post-checkout hook in the new worktree, which lands here and installs
+ * them, as long as the repo asked for them once. Never fails the report.
+ */
+async function adoptClaudeHooks(workspace: Workspace): Promise<void> {
+  try {
+    if (!(await claudeHooksWanted(localStoreDir(workspace.commonDir)))) return;
+    if ((await claudeHooksInstalled(workspace.repoRoot)).length === CLAUDE_HOOK_EVENTS.length) return;
+    await installClaudeHooks(workspace.repoRoot, await currentCli());
+  } catch {
+    // An unreadable settings file stays as it is; `teamroom doctor` points at it.
   }
 }
 
