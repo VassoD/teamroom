@@ -1,4 +1,4 @@
-import { agentLabel } from "../core/agents.js";
+import { AGENT_PRESENCE_TTL_MS, agentLabel } from "../core/agents.js";
 import { normalizePath } from "../core/overlap.js";
 import type { Activity, MemberRole, RoomView } from "../core/types.js";
 
@@ -27,7 +27,11 @@ export interface SessionSummary {
   hasAgent: boolean;
   /** Agent ids seen in this session, most recent first, such as `claude-code`. */
   agents: string[];
-  /** Agent ids that posted within the active window. */
+  /**
+   * One agent id per running agent, so two Claude Code tabs give
+   * `["claude-code", "claude-code"]`. An agent counts while it sends heartbeats
+   * or has posted within the active window.
+   */
   activeAgents: string[];
   /** Files an agent's own hook reported editing, newest first, one entry per file. */
   edits: AgentEdit[];
@@ -101,7 +105,8 @@ export function buildDashboard(
     const latestSnapshot = ordered.filter((entry) => entry.kind === "wip").at(-1);
     const snapshotAt = latestSnapshot?.createdAt ?? "";
     const latestSaid = ordered.filter((entry) => entry.kind === "note" || entry.kind === "edit").at(-1);
-    const describing = latestSaid && latestSaid.createdAt >= snapshotAt ? latestSaid : latest;
+    const latestWork = ordered.filter((entry) => entry.kind !== "presence").at(-1) ?? latest;
+    const describing = latestSaid && latestSaid.createdAt >= snapshotAt ? latestSaid : latestWork;
 
     const agentLastSeen = new Map<string, number>();
     for (const entry of ordered) {
@@ -120,7 +125,7 @@ export function buildDashboard(
       state: age <= ACTIVE_WINDOW_MS ? "active" : "idle",
       hasAgent: agents.length > 0,
       agents,
-      activeAgents: agents.filter((agent) => nowMs - (agentLastSeen.get(agent) ?? 0) <= ACTIVE_WINDOW_MS),
+      activeAgents: runningAgents(ordered, nowMs),
       edits,
       branch: latest.branch ?? latestSnapshot?.branch,
       files: [...new Set([...(latestSnapshot?.files ?? []).map(normalizePath), ...editedSinceSnapshot])].filter(
@@ -170,7 +175,8 @@ export function buildDashboard(
       activeAgentsByLabel,
     },
     hotFiles: findHotFiles(sessions),
-    recent: [...room.activity]
+    recent: room.activity
+      .filter((entry) => entry.kind !== "presence")
       .sort((first, second) => second.createdAt.localeCompare(first.createdAt))
       .slice(0, RECENT_ACTIVITY_SHOWN),
   };
@@ -182,6 +188,32 @@ export const UNKNOWN_AGENT = "agent";
 /** Display name for an agent id as stored on a session. */
 export function sessionAgentLabel(agent: string): string {
   return agentLabel(agent === UNKNOWN_AGENT ? undefined : agent);
+}
+
+/**
+ * Counts each running copy of an agent. Entries from the same instance are
+ * one agent. Entries without an instance (Claude Code's edit hook, older
+ * installs) only count when no instance of that agent is known, since they
+ * most likely come from one of those instances.
+ */
+function runningAgents(ordered: Activity[], nowMs: number): string[] {
+  const aliveUntil = new Map<string, { agent: string; instance?: string; until: number }>();
+  for (const entry of ordered) {
+    if (entry.source !== "agent") continue;
+    const agent = entry.agent ?? UNKNOWN_AGENT;
+    const key = `${agent}\u0000${entry.instance ?? ""}`;
+    const ttl = entry.kind === "presence" ? AGENT_PRESENCE_TTL_MS : ACTIVE_WINDOW_MS;
+    const until = Date.parse(entry.createdAt) + ttl;
+    const previous = aliveUntil.get(key);
+    if (!previous || previous.until < until) aliveUntil.set(key, { agent, instance: entry.instance, until });
+  }
+
+  const alive = [...aliveUntil.values()].filter((candidate) => candidate.until >= nowMs);
+  const withInstance = new Set(alive.filter((candidate) => candidate.instance).map((candidate) => candidate.agent));
+  return alive
+    .filter((candidate) => candidate.instance || !withInstance.has(candidate.agent))
+    .sort((first, second) => second.until - first.until)
+    .map((candidate) => candidate.agent);
 }
 
 function latestEditPerFile(ordered: Activity[]): AgentEdit[] {

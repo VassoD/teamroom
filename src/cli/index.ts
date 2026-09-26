@@ -384,12 +384,13 @@ const commands: Record<string, Command> = {
         `Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`
       );
     }
-    if (room.activity.length === 0) {
+    const shown = room.activity.filter((entry) => entry.kind !== "presence");
+    if (shown.length === 0) {
       print("\nNo activity yet.");
       return EXIT_OK;
     }
     print("");
-    for (const entry of [...room.activity].reverse()) {
+    for (const entry of [...shown].reverse()) {
       const files = entry.files.length > 0 ? ` [${entry.files.length} file(s)]` : "";
       const session = entry.session ? ` (${entry.session})` : "";
       print(`${formatAge(entry.createdAt).padEnd(9)} ${entry.member}${session} ${entry.kind}: ${entry.text}${files}`);

@@ -15,7 +15,7 @@ export interface NewRoomResult {
 }
 
 export type ActivityInput = Required<Pick<PostActivityRequest, "kind" | "source" | "text" | "files">> &
-  Pick<PostActivityRequest, "session" | "agent" | "branch" | "commit">;
+  Pick<PostActivityRequest, "session" | "agent" | "instance" | "branch" | "commit">;
 
 export function createRoom(name: string, creatorName: string, now = new Date()): NewRoomResult {
   const inviteCode = newInviteCode();
@@ -103,6 +103,7 @@ export function appendActivity(
     session: input.session,
     // An agent name only means something on agent activity.
     agent: input.source === "agent" ? input.agent : undefined,
+    instance: input.source === "agent" ? input.instance : undefined,
     kind: input.kind,
     source: input.source,
     text: input.text,
@@ -114,11 +115,25 @@ export function appendActivity(
   return {
     room: {
       ...room,
-      activity: [...room.activity, entry].slice(-MAX_ACTIVITY_KEPT),
+      activity: [...room.activity.filter((previous) => !isReplacedBy(previous, entry)), entry].slice(
+        -MAX_ACTIVITY_KEPT
+      ),
       updatedAt: timestamp,
     },
     entry,
   };
+}
+
+/** Heartbeats only matter as the latest one per agent instance, so older ones are dropped. */
+function isReplacedBy(previous: Activity, next: Activity): boolean {
+  return (
+    next.kind === "presence" &&
+    previous.kind === "presence" &&
+    previous.member === next.member &&
+    previous.session === next.session &&
+    previous.agent === next.agent &&
+    previous.instance === next.instance
+  );
 }
 
 export function toRoomView(room: Room, activityLimit?: number): RoomView {

@@ -1,12 +1,14 @@
 import { describeError } from "../client/errors.js";
 import type { WorkingState } from "../client/git.js";
-import { checkOverlap, formatOverlaps, reportWork, type Workspace } from "../client/workspace.js";
+import { checkOverlap, formatOverlaps, reportPresence, reportWork, type Workspace } from "../client/workspace.js";
+import { AGENT_HEARTBEAT_INTERVAL_MS } from "../core/agents.js";
 import type { FileOverlap } from "../core/types.js";
 
 export const AUTO_REPORT_INTERVAL_MS = 10_000;
 
 export interface AgentIdentity {
   agent?: string;
+  instance?: string;
 }
 
 /**
@@ -14,6 +16,7 @@ export interface AgentIdentity {
  * whatever the agent: Claude Code, Codex, Gemini CLI, Mistral Vibe, Cursor.
  * That makes the MCP server the one place that works for all of them without
  * agent-specific hooks. Every few seconds it:
+ * - says this agent is still running, so every open agent counts, busy or not;
  * - shares this checkout's changes when they differ from the last report, so
  *   other sessions see edits as they happen, not only at the next commit;
  * - notices when another session starts changing a file this checkout is
@@ -25,6 +28,8 @@ export class AutoReporter {
   private pendingOverlaps: FileOverlap[] = [];
   private running = false;
   private failureLogged = false;
+  private lastHeartbeatMs: number | undefined;
+  private heartbeatFailureLogged = false;
 
   constructor(
     private readonly getWorkspace: () => Promise<Workspace>,
@@ -43,6 +48,7 @@ export class AutoReporter {
     this.running = true;
     try {
       const workspace = await this.getWorkspace();
+      await this.heartbeatIfDue(workspace);
       const state = await workspace.git.workingState();
       await this.reportIfChanged(workspace, state);
       await this.collectNewOverlaps(workspace, state);
@@ -67,10 +73,34 @@ export class AutoReporter {
     return text;
   }
 
+  /**
+   * Kept apart from the rest of the tick: a server too old to know `presence`
+   * rejects the heartbeat, and that must not stop change reports or warnings.
+   */
+  private async heartbeatIfDue(workspace: Workspace): Promise<void> {
+    const nowMs = Date.now();
+    const instance = this.identity.instance;
+    if (!instance) return;
+    if (this.lastHeartbeatMs !== undefined && nowMs - this.lastHeartbeatMs < AGENT_HEARTBEAT_INTERVAL_MS) return;
+    try {
+      await reportPresence(workspace, { agent: this.identity.agent, instance });
+      this.lastHeartbeatMs = nowMs;
+      this.heartbeatFailureLogged = false;
+    } catch (error) {
+      if (!this.heartbeatFailureLogged) this.log(`heartbeat failed: ${describeError(error)}`);
+      this.heartbeatFailureLogged = true;
+    }
+  }
+
   private async reportIfChanged(workspace: Workspace, state: WorkingState): Promise<void> {
     const fingerprint = [state.branch ?? "", ...state.files].join("\u0000");
     if (fingerprint === this.lastReported) return;
-    await reportWork(workspace, { source: "agent", agent: this.identity.agent, state });
+    await reportWork(workspace, {
+      source: "agent",
+      agent: this.identity.agent,
+      instance: this.identity.instance,
+      state,
+    });
     this.lastReported = fingerprint;
   }
 

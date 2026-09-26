@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import { describeError } from "../client/errors.js";
@@ -43,6 +44,8 @@ interface ToolResult {
 /** Who is calling, learned from the MCP `initialize` handshake. */
 export interface ClientContext {
   agent?: string;
+  /** Unique to this server process. Each agent tab starts its own, so this tells tabs apart. */
+  instance: string;
 }
 
 interface ToolDefinition<Schema extends z.ZodObject> {
@@ -88,6 +91,7 @@ const TOOLS = [
       const { activity, omittedFiles } = await reportWork(workspace, {
         source: "agent",
         agent: client.agent,
+        instance: client.instance,
         note: input.note,
       });
       const omitted = omittedFiles > 0 ? ` (${omittedFiles} more left out, over the limit)` : "";
@@ -104,7 +108,13 @@ const TOOLS = [
       files: z.array(z.string()).optional().describe("Files you expect to change, relative to the repo root."),
     }),
     run: async (workspace, input, client) => {
-      await postNote(workspace, { text: input.text, files: input.files, source: "agent", agent: client.agent });
+      await postNote(workspace, {
+        text: input.text,
+        files: input.files,
+        source: "agent",
+        agent: client.agent,
+        instance: client.instance,
+      });
       return "Note posted to the room.";
     },
   }),
@@ -116,8 +126,9 @@ const TOOLS = [
     }),
     run: async (workspace, input) => {
       const { room } = await workspace.backend.getRoom(input.limit ?? DEFAULT_RECENT_LIMIT);
-      if (room.activity.length === 0) return "No activity yet.";
-      return [...room.activity]
+      const shown = room.activity.filter((entry) => entry.kind !== "presence");
+      if (shown.length === 0) return "No activity yet.";
+      return [...shown]
         .reverse()
         .map((entry) => {
           const files = entry.files.length > 0 ? ` [${entry.files.length} file(s)]` : "";
@@ -149,7 +160,7 @@ export interface McpHandlerOptions {
  * the problem through a tool result, when the repo is not usable (not a git repo, broken config).
  */
 export function createMcpHandler(getWorkspace: () => Promise<Workspace>, options: McpHandlerOptions = {}): McpHandler {
-  const client: ClientContext = {};
+  const client: ClientContext = { instance: randomUUID() };
   return {
     client,
     async handle(message) {
