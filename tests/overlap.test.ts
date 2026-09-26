@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findOverlaps, normalizePath } from "../src/core/overlap.js";
-import type { Activity } from "../src/core/types.js";
+import { findOverlaps, normalizePath, overlapSignature } from "../src/core/overlap.js";
+import type { Activity, OverlapTouch } from "../src/core/types.js";
 
 const NOW = new Date("2026-09-25T12:00:00.000Z");
 let nextId = 0;
@@ -162,5 +162,32 @@ describe("findOverlaps", () => {
 describe("normalizePath", () => {
   it("should trim, use forward slashes and drop a leading ./", () => {
     expect(normalizePath("  .\\src\\a.ts ")).toBe("src/a.ts");
+  });
+});
+
+describe("overlapSignature", () => {
+  function touch(overrides: Partial<OverlapTouch> = {}): OverlapTouch {
+    return { member: "bo", session: "bo-wt", kind: "wip", text: "Changing 1 file.", at: hoursAgo(2), ...overrides };
+  }
+
+  it("should stay the same while a session keeps editing the file", () => {
+    const later = touch({ kind: "edit", text: "Codex edited src/auth.ts", at: hoursAgo(1) });
+
+    expect(overlapSignature([later])).toBe(overlapSignature([touch()]));
+  });
+
+  it("should change when someone new is in the file", () => {
+    expect(overlapSignature([touch(), touch({ member: "cy", session: "cy-wt" })])).not.toBe(
+      overlapSignature([touch()])
+    );
+  });
+
+  it("should change when the session posts a new plan", () => {
+    const withPlan = touch({ plan: "renaming auth to session" });
+
+    expect(overlapSignature([withPlan])).not.toBe(overlapSignature([touch()]));
+    expect(overlapSignature([touch({ kind: "note", text: "renaming auth to session" })])).toBe(
+      overlapSignature([withPlan])
+    );
   });
 });

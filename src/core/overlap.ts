@@ -81,6 +81,22 @@ export function findOverlaps({
     .sort((first, second) => first.file.localeCompare(second.file));
 }
 
+/**
+ * Identifies an overlap for "already warned about this" checks: who is in the
+ * file and what they said they plan. Timestamps and snapshot text are left
+ * out, since they change on every edit of a session that keeps working, which
+ * is the overlap the reader already knows about.
+ */
+export function overlapSignature(touches: OverlapTouch[]): string {
+  return touches
+    .map((touch) => {
+      const plan = touch.kind === "note" ? touch.text : (touch.plan ?? "");
+      return `${touch.member}/${touch.session ?? ""}:${plan}`;
+    })
+    .sort()
+    .join("\u0000");
+}
+
 export function normalizePath(file: string): string {
   return file.trim().replace(/\\/g, "/").replace(/^\.\//, "");
 }
@@ -110,7 +126,7 @@ function isSuperseded(entry: Activity, latestSnapshot: Activity | undefined): bo
   return false;
 }
 
-function latestSnapshotBySession(activity: Activity[]): Map<string, Activity> {
+export function latestSnapshotBySession(activity: Activity[]): Map<string, Activity> {
   const latestBySession = new Map<string, Activity>();
   for (const entry of activity) {
     if (entry.kind !== "wip") continue;

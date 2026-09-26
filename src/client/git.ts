@@ -101,7 +101,8 @@ export class Git {
     ]);
     const mergeBase = baseRef && commit ? await this.optional(["merge-base", "HEAD", baseRef]) : "";
     // Paths must be relative to the repo root whatever the cwd or diff.relative setting.
-    const diffBase = ["diff", "--name-only", "--no-relative", "-z"];
+    // --no-renames lists both sides of a rename: someone editing the old path must hear about it.
+    const diffBase = ["diff", "--name-only", "--no-relative", "--no-renames", "-z"];
 
     const [changed, staged, untracked] = await Promise.all([
       commit ? this.lines([...diffBase, mergeBase || "HEAD"]) : Promise.resolve([]),
