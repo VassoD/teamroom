@@ -22,7 +22,15 @@ import {
 } from "../client/workspace.js";
 import { MAX_NAME_LENGTH } from "../core/schemas.js";
 import { runMcpServer } from "../mcp/server.js";
-import { DEFAULT_DATA_DIR, DEFAULT_HOST, DEFAULT_PORT, startServer } from "../server/serve.js";
+import {
+  DEFAULT_DATA_DIR,
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  resolveServeOptions,
+  SERVE_ENV,
+  ServeConfigError,
+  startServer,
+} from "../server/serve.js";
 
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
@@ -36,7 +44,7 @@ const HELP = `teamroom: know what your teammates (and their agents) are touching
 
 Setup
   teamroom serve [--port ${DEFAULT_PORT}] [--host ${DEFAULT_HOST}] [--data-dir ${DEFAULT_DATA_DIR}] [--trust-proxy]
-  teamroom create --server <url> [--room-name <name>] [--name <you>]
+  teamroom create --server <url> [--room-name <name>] [--name <you>] [--create-key <key>]
   teamroom join '<invite link>' [--name <you>]
   teamroom agents install           Let Claude Code and Codex use teamroom in this repo
   teamroom hooks install | uninstall [--claude]   --claude also reports each file Claude Code edits
@@ -58,6 +66,9 @@ Room admin
 Names default to your git user.name, the room name to the repo folder. create and join
 install the git hooks unless you pass --skip-hooks.
 
+Server environment: PORT, HOST, TEAMROOM_DATA_DIR, TEAMROOM_TRUST_PROXY, and TEAMROOM_CREATE_KEY
+(when set, creating a room needs that key; joining with an invite link does not).
+
 Environment: TEAMROOM_SERVER, TEAMROOM_ROOM, TEAMROOM_MEMBER, TEAMROOM_TOKEN override the
 repo config. TEAMROOM_SESSION names this checkout (default: derived from its path).`;
 
@@ -68,15 +79,25 @@ const commands: Record<string, Command> = {
     const { values } = parseArgs({
       args,
       options: {
-        port: { type: "string", default: String(DEFAULT_PORT) },
-        host: { type: "string", default: DEFAULT_HOST },
-        "data-dir": { type: "string", default: DEFAULT_DATA_DIR },
-        "trust-proxy": { type: "boolean", default: false },
+        port: { type: "string" },
+        host: { type: "string" },
+        "data-dir": { type: "string" },
+        "trust-proxy": { type: "boolean" },
       },
     });
-    const port = Number(values.port);
-    if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new UsageError("--port must be 1 to 65535.");
-    startServer({ port, host: values.host, dataDir: values["data-dir"], trustProxy: values["trust-proxy"] });
+    let options: ReturnType<typeof resolveServeOptions>;
+    try {
+      options = resolveServeOptions({
+        port: values.port,
+        host: values.host,
+        dataDir: values["data-dir"],
+        trustProxy: values["trust-proxy"],
+      });
+    } catch (error) {
+      if (error instanceof ServeConfigError) throw new UsageError(error.message);
+      throw error;
+    }
+    startServer(options);
     // Keep the process alive until the server shuts itself down on a signal.
     await new Promise<never>(() => undefined);
     return EXIT_OK;
@@ -91,6 +112,7 @@ const commands: Record<string, Command> = {
         name: { type: "string" },
         "skip-hooks": { type: "boolean", default: false },
         "skip-agents": { type: "boolean", default: false },
+        "create-key": { type: "string" },
       },
     });
     const serverInput = values.server ?? process.env[ENV.server];
@@ -105,7 +127,8 @@ const commands: Record<string, Command> = {
     const name = await memberName(values.name, git);
     const roomName = values["room-name"]?.trim() || path.basename(repoRoot);
 
-    const created = await new ApiClient({ server }).createRoom(roomName, name);
+    const createKey = values["create-key"] ?? process.env[SERVE_ENV.createKey];
+    const created = await new ApiClient({ server }).createRoom(roomName, name, createKey);
     await saveConfig(commonDir, { server, roomId: created.room.id, member: created.me, token: created.token });
     print(`Created room "${created.room.name}". You are ${created.me}, the owner.`);
     await finishSetup(git, repoRoot, { hooks: !values["skip-hooks"], agents: !values["skip-agents"] });

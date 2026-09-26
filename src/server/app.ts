@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { z } from "zod";
@@ -46,6 +46,18 @@ export interface AppOptions {
   rateLimits?: Partial<typeof DEFAULT_RATE_LIMITS>;
   /** Identifies the caller for anonymous rate limits (room creation, joining). */
   getClientAddress?: (context: Context) => string;
+  /** When set, `POST /v1/rooms` requires it in the X-Teamroom-Create-Key header. */
+  createKey?: string;
+}
+
+export const CREATE_KEY_HEADER = "x-teamroom-create-key";
+
+/** Constant-time comparison, so response timing does not leak how much of a guessed key was right. */
+export function createKeyMatches(expected: string, provided: string | undefined): boolean {
+  if (provided === undefined) return false;
+  const expectedBytes = Buffer.from(expected);
+  const providedBytes = Buffer.from(provided);
+  return expectedBytes.length === providedBytes.length && timingSafeEqual(expectedBytes, providedBytes);
 }
 
 interface AppVariables {
@@ -58,6 +70,7 @@ export type ErrorCode =
   | "AUTH_REQUIRED"
   | "INVALID_TOKEN"
   | "FORBIDDEN"
+  | "CREATE_KEY_REQUIRED"
   | "INVALID_INVITE"
   | "INVALID_INPUT"
   | "INVALID_JSON"
@@ -88,6 +101,7 @@ export function createApp({
   logger = silentLogger,
   rateLimits = {},
   getClientAddress = () => "anonymous",
+  createKey,
 }: AppOptions): Hono<{ Variables: AppVariables }> {
   const limits = { ...DEFAULT_RATE_LIMITS, ...rateLimits };
   const createLimiter = new RateLimiter(limits.createRoom);
@@ -152,6 +166,13 @@ export function createApp({
 
   app.post("/v1/rooms", async (context) => {
     enforceRateLimit(createLimiter, `create:${getClientAddress(context)}`);
+    if (createKey && !createKeyMatches(createKey, context.req.header(CREATE_KEY_HEADER))) {
+      throw new HttpError(
+        403,
+        "CREATE_KEY_REQUIRED",
+        "This server only lets people with its create key make rooms. Ask whoever runs it, or join a room with an invite link."
+      );
+    }
     const input = await parseBody(context, createRoomRequestSchema);
     const { room, inviteCode, token } = createRoom(input.name, input.member);
     await store.create(room);
