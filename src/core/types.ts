@@ -4,8 +4,10 @@
  * - `commit`: files changed by one commit.
  * - `note`: free text, optionally about files ("about to refactor auth/").
  * - `edit`: files one coding agent just edited, reported by the agent's own hook.
+ * - `presence`: a running agent saying it is still there. A newer one from the same
+ *   agent instance replaces the older one, so heartbeats never pile up.
  */
-export type ActivityKind = "wip" | "commit" | "note" | "edit";
+export type ActivityKind = "wip" | "commit" | "note" | "edit" | "presence";
 
 /** Who produced an activity entry: a person at the CLI, the git hook, or a coding agent via MCP. */
 export type ActivitySource = "human" | "hook" | "agent";
@@ -28,6 +30,8 @@ export interface Activity {
   source: ActivitySource;
   /** Which coding agent posted it, such as `claude-code` or `codex`. Only set when `source` is `agent`. */
   agent?: string;
+  /** One running copy of that agent, such as one Claude Code tab, so two tabs count as two agents. */
+  instance?: string;
   text: string;
   branch?: string;
   commit?: string;

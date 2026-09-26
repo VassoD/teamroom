@@ -176,6 +176,68 @@ describe("buildDashboard", () => {
     expect(dashboard.members.find((member) => member.name === "bob")?.activeAgents).toBe(2);
   });
 
+  it("should count every running agent instance, even two tabs of the same agent in one checkout", () => {
+    const dashboard = buildDashboard(
+      room([
+        entry({
+          source: "agent",
+          agent: "claude-code",
+          instance: "tab-one",
+          kind: "presence",
+          text: "Claude Code is running",
+        }),
+        entry({
+          source: "agent",
+          agent: "claude-code",
+          instance: "tab-two",
+          kind: "presence",
+          text: "Claude Code is running",
+        }),
+        entry({ source: "agent", agent: "codex", instance: "tab-three", kind: "presence", text: "Codex is running" }),
+      ]),
+      "alice",
+      NOW
+    );
+    expect(dashboard.totals.activeAgents).toBe(3);
+    expect(dashboard.totals.activeAgentsByLabel).toEqual({ "Claude Code": 2, Codex: 1 });
+  });
+
+  it("should not count edits without an instance as an extra agent when that agent sends heartbeats", () => {
+    const dashboard = buildDashboard(
+      room([
+        entry({ source: "agent", agent: "claude-code", kind: "edit", files: ["src/a.ts"], createdAt: minutesAgo(2) }),
+        entry({ source: "agent", agent: "claude-code", instance: "tab-one", kind: "presence", text: "running" }),
+      ]),
+      "alice",
+      NOW
+    );
+    expect(dashboard.totals.activeAgents).toBe(1);
+  });
+
+  it("should stop counting an agent a few minutes after its last heartbeat", () => {
+    const dashboard = buildDashboard(
+      room([
+        entry({ source: "agent", agent: "claude-code", instance: "gone", kind: "presence", createdAt: minutesAgo(5) }),
+      ]),
+      "alice",
+      NOW
+    );
+    expect(dashboard.totals.activeAgents).toBe(0);
+  });
+
+  it("should keep heartbeats out of what a session is doing and out of recent activity", () => {
+    const dashboard = buildDashboard(
+      room([
+        entry({ kind: "note", source: "agent", agent: "claude-code", text: "Renaming User", createdAt: minutesAgo(3) }),
+        entry({ source: "agent", agent: "claude-code", instance: "tab-one", kind: "presence", text: "running" }),
+      ]),
+      "alice",
+      NOW
+    );
+    expect(flattenSessions(dashboard)[0]?.doing).toBe("Renaming User");
+    expect(dashboard.recent.map((recent) => recent.kind)).toEqual(["note"]);
+  });
+
   it("should attribute edited files to the agent that edited them", () => {
     const dashboard = buildDashboard(
       room([

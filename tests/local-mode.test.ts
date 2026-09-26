@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_ROOM_ID, localStoreDir } from "../src/client/backend.js";
 import { handleClaudeHook } from "../src/client/claude-events.js";
 import { checkOverlap, openWorkspace, reportWork, type Workspace } from "../src/client/workspace.js";
+import { buildDashboard } from "../src/dashboard/model.js";
 import { AutoReporter } from "../src/mcp/auto-report.js";
 
 const execFileAsync = promisify(execFile);
@@ -150,6 +151,20 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
     expect(seenFromA.overlaps[0]?.touchedBy).toEqual([
       expect.objectContaining({ session: worktreeB.session, agent: "mistral-vibe", kind: "wip" }),
     ]);
+  });
+
+  it("should count two agent tabs in the same checkout as two running agents", async () => {
+    const firstTab = new AutoReporter(async () => worktreeA, { agent: "claude-code", instance: "tab-one" });
+    const secondTab = new AutoReporter(async () => worktreeA, { agent: "claude-code", instance: "tab-two" });
+
+    await Promise.all([firstTab.tick(), secondTab.tick()]);
+    const { room, me } = await worktreeA.backend.getRoom(1000);
+    const session = buildDashboard(room, me)
+      .members.flatMap((member) => member.sessions)
+      .find((candidate) => candidate.session === worktreeA.session);
+
+    expect(session?.activeAgents.filter((agent) => agent === "claude-code")).toHaveLength(2);
+    expect(room.activity.filter((entry) => entry.kind === "presence" && entry.instance === "tab-one")).toHaveLength(1);
   });
 
   it("should not lose writes when many hooks fire at once from both worktrees", async () => {

@@ -108,7 +108,7 @@ export interface ReportResult {
  */
 export async function reportWork(
   workspace: Workspace,
-  options: { source: ActivitySource; note?: string; agent?: string; state?: WorkingState }
+  options: { source: ActivitySource; note?: string; agent?: string; instance?: string; state?: WorkingState }
 ): Promise<ReportResult> {
   const state = options.state ?? (await workspace.git.workingState());
   const files = state.files.slice(0, MAX_FILES_PER_ACTIVITY);
@@ -117,6 +117,7 @@ export async function reportWork(
     kind: "wip",
     source: options.source,
     agent: options.agent,
+    instance: options.instance,
     session: workspace.session,
     text: truncate(options.note?.trim() || describeSnapshot(state.files.length, state.branch)),
     branch: state.branch,
@@ -128,13 +129,14 @@ export async function reportWork(
 
 export async function postNote(
   workspace: Workspace,
-  options: { text: string; files?: string[]; source: ActivitySource; agent?: string }
+  options: { text: string; files?: string[]; source: ActivitySource; agent?: string; instance?: string }
 ): Promise<Activity> {
   const [branch, commit] = await Promise.all([workspace.git.currentBranch(), workspace.git.headCommit()]);
   return workspace.backend.postActivity({
     kind: "note",
     source: options.source,
     agent: options.agent,
+    instance: options.instance,
     session: workspace.session,
     text: truncate(options.text.trim()),
     branch,
@@ -163,6 +165,22 @@ export async function reportEdit(
     branch,
     commit,
     files: [file],
+  });
+}
+
+/** Tells the room this agent is still running, so it counts even before it changes anything. */
+export async function reportPresence(
+  workspace: Workspace,
+  options: { agent?: string; instance: string }
+): Promise<Activity> {
+  return workspace.backend.postActivity({
+    kind: "presence",
+    source: "agent",
+    agent: options.agent,
+    instance: options.instance,
+    session: workspace.session,
+    text: `${agentLabel(options.agent)} is running`,
+    files: [],
   });
 }
 
