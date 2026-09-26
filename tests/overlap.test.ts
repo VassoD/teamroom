@@ -127,6 +127,31 @@ describe("findOverlaps", () => {
     ]);
   });
 
+  it("should carry a session's plan for the file when a later snapshot is its latest touch", () => {
+    const activity = [
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "note",
+        files: ["a.ts"],
+        text: "Dark palette",
+        createdAt: hoursAgo(2),
+      }),
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "wip",
+        files: ["a.ts"],
+        text: "Changing 1 file",
+        createdAt: hoursAgo(1),
+      }),
+    ];
+
+    const [touch] = findOverlaps({ activity, files: ["a.ts"], member: "ada", now: NOW })[0]?.touchedBy ?? [];
+
+    expect(touch).toMatchObject({ kind: "wip", text: "Changing 1 file", plan: "Dark palette" });
+  });
+
   it("should match paths regardless of ./ prefixes and backslashes", () => {
     const activity = [entry({ member: "bo", files: ["src\\auth.ts"], createdAt: hoursAgo(1) })];
 

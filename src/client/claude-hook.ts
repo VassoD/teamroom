@@ -48,8 +48,19 @@ interface MatcherGroup {
 
 interface ClaudeSettings {
   hooks?: Record<string, MatcherGroup[] | undefined>;
+  permissions?: { allow?: string[]; [key: string]: unknown };
   [key: string]: unknown;
 }
+
+/**
+ * teamroom's own tools only read the room or post a short note, so asking
+ * before each call just teaches people to click through, and headless runs
+ * deny them outright. Nothing else is pre-approved.
+ */
+export const CLAUDE_ALLOWED_TOOLS = ["mcp__teamroom", "Bash(teamroom check:*)", "Bash(teamroom note:*)"];
+
+/** Marks, in the shared git dir, that this repo wants Claude Code hooks, so new worktrees get them too. */
+const CLAUDE_WANTED_FILE = "claude-hooks-wanted";
 
 export type ClaudeHookChange = "installed" | "unchanged" | "removed" | "absent";
 
@@ -108,10 +119,36 @@ export async function installClaudeHooks(
     changed = true;
   }
 
+  const allow = settings.permissions?.allow ?? [];
+  const missing = CLAUDE_ALLOWED_TOOLS.filter((rule) => !allow.includes(rule));
+  if (missing.length > 0) {
+    settings.permissions = { ...settings.permissions, allow: [...allow, ...missing] };
+    changed = true;
+  }
+
   if (!changed) return { change: "unchanged", file };
   settings.hooks = hooks;
   await writeSettings(file, settings);
   return { change: "installed", file };
+}
+
+export async function rememberClaudeHooksWanted(storeDir: string, wanted: boolean): Promise<void> {
+  const file = path.join(storeDir, CLAUDE_WANTED_FILE);
+  if (!wanted) {
+    await fs.rm(file, { force: true });
+    return;
+  }
+  await fs.mkdir(storeDir, { recursive: true });
+  await fs.writeFile(file, "", "utf8");
+}
+
+export async function claudeHooksWanted(storeDir: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(storeDir, CLAUDE_WANTED_FILE));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function claudeHooksInstalled(repoRoot: string): Promise<ClaudeHookEvent[]> {
@@ -136,6 +173,17 @@ export async function uninstallClaudeHooks(repoRoot: string): Promise<{ change: 
   if (!removed) return { change: "absent", file };
   if (Object.keys(hooks).length > 0) settings.hooks = hooks;
   else delete settings.hooks;
+  removeAllowedTools(settings);
   await writeSettings(file, settings);
   return { change: "removed", file };
+}
+
+function removeAllowedTools(settings: ClaudeSettings): void {
+  const allow = settings.permissions?.allow;
+  if (!settings.permissions || !allow) return;
+  const remaining = allow.filter((rule) => !CLAUDE_ALLOWED_TOOLS.includes(rule));
+  const { allow: _removed, ...otherPermissions } = settings.permissions;
+  const permissions = remaining.length > 0 ? { ...otherPermissions, allow: remaining } : otherPermissions;
+  if (Object.keys(permissions).length > 0) settings.permissions = permissions;
+  else delete settings.permissions;
 }

@@ -70,6 +70,8 @@ export interface OverlapTouch {
   branch?: string;
   commit?: string;
   at: string;
+  /** The session's latest note about this file, when the latest touch is something else. */
+  plan?: string;
 }
 
 export interface FileOverlap {

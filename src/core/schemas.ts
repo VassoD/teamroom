@@ -80,6 +80,7 @@ export const fileOverlapSchema = z.object({
       branch: z.string().optional(),
       commit: z.string().optional(),
       at: z.string(),
+      plan: z.string().optional(),
     })
   ),
 });
