@@ -2,6 +2,7 @@ import { describeError } from "../client/errors.js";
 import type { WorkingState } from "../client/git.js";
 import { checkOverlap, formatOverlaps, reportPresence, reportWork, type Workspace } from "../client/workspace.js";
 import { AGENT_HEARTBEAT_INTERVAL_MS } from "../core/agents.js";
+import { overlapSignature } from "../core/overlap.js";
 import type { FileOverlap } from "../core/types.js";
 
 export const AUTO_REPORT_INTERVAL_MS = 10_000;
@@ -20,7 +21,9 @@ export interface AgentIdentity {
  * - shares this checkout's changes when they differ from the last report, so
  *   other sessions see edits as they happen, not only at the next commit;
  * - notices when another session starts changing a file this checkout is
- *   changing, and queues a "Heads up" that the next tool result carries.
+ *   changing, or posts a new plan for it, and queues a "Heads up" that the
+ *   next tool result carries. More edits from a session already warned
+ *   about stay quiet.
  */
 export class AutoReporter {
   private lastReported: string | undefined;
@@ -107,7 +110,7 @@ export class AutoReporter {
   private async collectNewOverlaps(workspace: Workspace, state: WorkingState): Promise<void> {
     const { overlaps } = await checkOverlap(workspace, { state });
     for (const overlap of overlaps) {
-      const signature = overlap.touchedBy.map((touch) => `${touch.member}/${touch.session ?? ""}@${touch.at}`).join();
+      const signature = overlapSignature(overlap.touchedBy);
       if (this.warned.get(overlap.file) === signature) continue;
       this.warned.set(overlap.file, signature);
       this.pendingOverlaps = [...this.pendingOverlaps.filter((queued) => queued.file !== overlap.file), overlap];

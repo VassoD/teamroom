@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { latestSnapshotBySession } from "./overlap.js";
 import type { PostActivityRequest } from "./schemas.js";
 import { hashSecret, newInviteCode, newMemberToken, newRoomId, secretMatchesHash } from "./secrets.js";
 import type { Activity, Member, Room, RoomView } from "./types.js";
@@ -115,13 +116,33 @@ export function appendActivity(
   return {
     room: {
       ...room,
-      activity: [...room.activity.filter((previous) => !isReplacedBy(previous, entry)), entry].slice(
-        -MAX_ACTIVITY_KEPT
-      ),
+      activity: trimActivity([...room.activity.filter((previous) => !isReplacedBy(previous, entry)), entry]),
       updatedAt: timestamp,
     },
     entry,
   };
+}
+
+/**
+ * Drops the oldest entries over the limit, but spares each session's latest
+ * `wip` snapshot: it is that session's current state, not history, and a
+ * quiet session with pending changes must not vanish because others are busy.
+ */
+function trimActivity(activity: Activity[]): Activity[] {
+  let excess = activity.length - MAX_ACTIVITY_KEPT;
+  if (excess <= 0) return activity;
+
+  const current = new Set([...latestSnapshotBySession(activity).values()].map((snapshot) => snapshot.id));
+  const dropped = new Set<string>();
+  for (const entry of activity) {
+    if (excess === 0) break;
+    if (current.has(entry.id)) continue;
+    dropped.add(entry.id);
+    excess -= 1;
+  }
+  const kept = activity.filter((entry) => !dropped.has(entry.id));
+  // Only when snapshots alone exceed the limit, which takes that many sessions.
+  return kept.slice(-MAX_ACTIVITY_KEPT);
 }
 
 /** Heartbeats only matter as the latest one per agent instance, so older ones are dropped. */

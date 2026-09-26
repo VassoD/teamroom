@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { FileOverlap } from "../core/types.js";
+import { overlapSignature } from "../core/overlap.js";
 import { buildDashboard, type SessionSummary } from "../dashboard/model.js";
 import { localStoreDir } from "./backend.js";
 import { CLAUDE_EDIT_TOOLS } from "./claude-hook.js";
@@ -121,8 +121,9 @@ function describeSession(session: SessionSummary): string {
 /**
  * Pauses an edit once when another session is changing the same file, with
  * the details, so Claude can tell the user or adjust. Retrying the same edit
- * goes through: teamroom informs, it never blocks work for good. A new
- * overlap on the same file (someone else, or newer work) pauses again.
+ * goes through: teamroom informs, it never blocks work for good. Someone new
+ * in the file, or a new plan for it, pauses again; more edits from the same
+ * session do not.
  */
 async function guardEdit(workspace: Workspace, file: string, claudeSessionId: string | undefined): Promise<HookOutput> {
   const repoPath = toRepoPath(workspace, file);
@@ -131,7 +132,7 @@ async function guardEdit(workspace: Workspace, file: string, claudeSessionId: st
   const { overlaps } = await checkOverlap(workspace, { files: [repoPath] });
   if (overlaps.length === 0) return "";
 
-  const signature = overlapSignature(overlaps);
+  const signature = overlapSignature(overlaps.flatMap((overlap) => overlap.touchedBy));
   const state = new WarningState(workspace.commonDir, claudeSessionId);
   if ((await state.lastWarned(repoPath)) === signature) return "";
   await state.remember(repoPath, signature);
@@ -146,13 +147,6 @@ async function guardEdit(workspace: Workspace, file: string, claudeSessionId: st
   return JSON.stringify({
     hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
   });
-}
-
-function overlapSignature(overlaps: FileOverlap[]): string {
-  return overlaps
-    .flatMap((overlap) => overlap.touchedBy.map((touch) => `${touch.member}/${touch.session ?? ""}@${touch.at}`))
-    .sort()
-    .join(",");
 }
 
 /** Which overlaps a Claude session was already told about, one small file per session. */

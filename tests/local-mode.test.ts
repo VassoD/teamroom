@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_ROOM_ID, localStoreDir } from "../src/client/backend.js";
 import { handleClaudeHook } from "../src/client/claude-events.js";
-import { checkOverlap, openWorkspace, reportWork, type Workspace } from "../src/client/workspace.js";
+import { Git } from "../src/client/git.js";
+import { checkOverlap, openWorkspace, postNote, reportWork, type Workspace } from "../src/client/workspace.js";
 import { buildDashboard } from "../src/dashboard/model.js";
 import { AutoReporter } from "../src/mcp/auto-report.js";
 
@@ -104,6 +105,23 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
     expect(otherSession).not.toBe("");
   });
 
+  it("should not pause again while the other session keeps editing, only when it posts a new plan", async () => {
+    const file = path.join(worktreeB.repoRoot, "src", "auth.ts");
+    const pre = { event: "PreToolUse", sessionId: "claude-1", tool: "Edit", file } as const;
+
+    await handleClaudeHook(
+      { ...pre, file: path.join(worktreeA.repoRoot, "src", "auth.ts"), event: "PostToolUse" },
+      worktreeA
+    );
+    const afterMoreEdits = await handleClaudeHook(pre, worktreeB);
+    await postNote(worktreeA, { text: "Moving auth to sessions", files: ["src/auth.ts"], source: "agent" });
+    const afterNewPlan = JSON.parse(await handleClaudeHook(pre, worktreeB)) as PreToolUseOutput;
+
+    expect(afterMoreEdits).toBe("");
+    expect(afterNewPlan.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(afterNewPlan.hookSpecificOutput.permissionDecisionReason).toContain("Moving auth to sessions");
+  });
+
   it("should let edits to files nobody else is changing through silently", async () => {
     const file = path.join(worktreeB.repoRoot, "src", "user.ts");
 
@@ -180,5 +198,31 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
     await Promise.all(writes);
 
     expect((await worktreeA.backend.getRoom(1000)).room.activity.length).toBe(before + 20);
+  });
+});
+
+describe("working state", () => {
+  let tempDir: string;
+
+  beforeAll(async () => {
+    tempDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "teamroom-rename-")));
+  });
+
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("should list both paths of a renamed file, so edits to the old path still overlap", async () => {
+    await git(tempDir, "init", "--quiet", "-b", "main");
+    await fs.writeFile(path.join(tempDir, "old.ts"), "export const value = 1;\n");
+    await git(tempDir, "add", ".");
+    await git(tempDir, "commit", "--quiet", "-m", "initial");
+    await git(tempDir, "checkout", "--quiet", "-b", "rename");
+    await git(tempDir, "mv", "old.ts", "new.ts");
+    await git(tempDir, "commit", "--quiet", "-m", "rename");
+
+    const state = await new Git(tempDir).workingState();
+
+    expect(state.files).toEqual(["new.ts", "old.ts"]);
   });
 });
