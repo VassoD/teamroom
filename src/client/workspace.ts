@@ -212,7 +212,8 @@ export function formatOverlaps(overlaps: FileOverlap[]): string {
       const touches = overlap.touchedBy.map((touch) => {
         const where = [touch.session, touch.branch].filter(Boolean).join(" on ");
         const via = touch.agent ? ` via ${agentLabel(touch.agent)}` : "";
-        return `  - ${touch.member}${via}${where ? ` (${where})` : ""}, ${touch.kind} ${formatAge(touch.at)}: ${touch.text}`;
+        const plan = touch.plan ? ` Plan: ${touch.plan}` : "";
+        return `  - ${touch.member}${via}${where ? ` (${where})` : ""}, ${touch.kind} ${formatAge(touch.at)}: ${touch.text}${plan}`;
       });
       return [overlap.file, ...touches].join("\n");
     })

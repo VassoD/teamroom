@@ -33,6 +33,7 @@ export function findOverlaps({
   const wanted = new Set(files.map(normalizePath));
   const latestSnapshots = latestSnapshotBySession(activity);
   const latestTouch = new Map<string, Map<string, OverlapTouch>>();
+  const latestPlan = new Map<string, Map<string, { text: string; at: number }>>();
 
   for (const entry of activity) {
     if (isCaller(entry, member, session)) continue;
@@ -44,8 +45,15 @@ export function findOverlaps({
       const file = normalizePath(rawFile);
       if (!wanted.has(file)) continue;
 
-      const bySession = latestTouch.get(file) ?? new Map<string, OverlapTouch>();
       const key = sessionKey(entry);
+      if (entry.kind === "note") {
+        const plans = latestPlan.get(file) ?? new Map<string, { text: string; at: number }>();
+        const previousPlan = plans.get(key);
+        if (!previousPlan || previousPlan.at < at) plans.set(key, { text: entry.text, at });
+        latestPlan.set(file, plans);
+      }
+
+      const bySession = latestTouch.get(file) ?? new Map<string, OverlapTouch>();
       const previous = bySession.get(key);
       if (!previous || Date.parse(previous.at) < at) {
         bySession.set(key, {
@@ -66,13 +74,24 @@ export function findOverlaps({
   return [...latestTouch.entries()]
     .map(([file, bySession]) => ({
       file,
-      touchedBy: [...bySession.values()].sort((first, second) => second.at.localeCompare(first.at)),
+      touchedBy: [...bySession.entries()]
+        .map(([key, touch]) => withPlan(touch, latestPlan.get(file)?.get(key)?.text))
+        .sort((first, second) => second.at.localeCompare(first.at)),
     }))
     .sort((first, second) => first.file.localeCompare(second.file));
 }
 
 export function normalizePath(file: string): string {
   return file.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/**
+ * A later snapshot is the latest touch, but its text ("Changing 3 files") says
+ * nothing about intent. The session's plan for the file is what the reader
+ * needs to decide, so it rides along.
+ */
+function withPlan(touch: OverlapTouch, plan: string | undefined): OverlapTouch {
+  return plan && touch.kind !== "note" ? { ...touch, plan } : touch;
 }
 
 function isCaller(entry: Activity, member: string, session: string | undefined): boolean {
