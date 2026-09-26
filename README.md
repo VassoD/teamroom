@@ -28,6 +28,8 @@ npx teamroom serve --host 0.0.0.0 --port 8787 --data-dir /var/lib/teamroom
 
 The server binds to `127.0.0.1` by default. Put it behind HTTPS (a reverse proxy) before exposing it, and pass `--trust-proxy` only when that proxy sets `X-Forwarded-For`.
 
+To host it for a team (Fly.io, Docker, the environment variables it reads, and how to restrict who can create rooms), see [docs/hosting.md](docs/hosting.md).
+
 In your repo, one person creates the room:
 
 ```sh

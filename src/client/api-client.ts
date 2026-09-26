@@ -41,7 +41,11 @@ interface RequestOptions<Schema extends z.ZodType> {
   schema: Schema;
   /** Only idempotent requests are retried, so a timed-out POST is never duplicated. */
   retry: boolean;
+  headers?: Record<string, string>;
 }
+
+/** Sent when creating a room on a server started with TEAMROOM_CREATE_KEY. */
+export const CREATE_KEY_HEADER = "x-teamroom-create-key";
 
 export class ApiClient {
   private readonly server: string;
@@ -62,13 +66,14 @@ export class ApiClient {
     await this.request({ method: "GET", path: "/health", schema: healthResponseSchema, retry: false });
   }
 
-  async createRoom(name: string, member: string): Promise<z.infer<typeof createdRoomSchema>> {
+  async createRoom(name: string, member: string, createKey?: string): Promise<z.infer<typeof createdRoomSchema>> {
     return this.request({
       method: "POST",
       path: "/v1/rooms",
       body: { name, member },
       schema: createdRoomSchema,
       retry: false,
+      headers: createKey ? { [CREATE_KEY_HEADER]: createKey } : undefined,
     });
   }
 
@@ -165,7 +170,7 @@ export class ApiClient {
   }
 
   private async send<Schema extends z.ZodType>(request: RequestOptions<Schema>): Promise<z.output<Schema>> {
-    const headers: Record<string, string> = { accept: "application/json" };
+    const headers: Record<string, string> = { accept: "application/json", ...request.headers };
     if (request.body !== undefined) headers["content-type"] = "application/json";
     if (this.options.token) headers.authorization = `Bearer ${this.options.token}`;
 

@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.claude
+.attic
+.teamroom-data
+coverage
+site
+tests
+*.log
+.env
+.env.*
