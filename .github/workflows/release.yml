@@ -1,0 +1,54 @@
+name: Release
+
+# Publishing a GitHub release tagged vX.Y.Z publishes teamroom@X.Y.Z to npm.
+# npm trusts this workflow through OIDC (trusted publishing), so no npm token
+# or 2FA code is needed. The trusted publisher on npmjs.com names this file,
+# so keep the filename release.yml.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install --global npm@11
+
+      - name: Set the version from the release tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Release tag '$TAG' is not a version. Use a tag like v0.1.1."
+            exit 1
+          fi
+          if npm view "teamroom@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::teamroom@$VERSION is already on npm. Use a new version number."
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - run: npm ci
+
+      # prepublishOnly runs typecheck, lint, tests and the build first.
+      - run: npm publish --access public

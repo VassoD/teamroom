@@ -135,6 +135,10 @@ Other scripts: `build`, `typecheck`, `lint`, `test`, `test:watch`. CI runs `chec
 
 Tooling: TypeScript 7 for type checking and builds, Vitest for tests, and Biome for linting and formatting (one dependency instead of ESLint plus Prettier).
 
+## Releasing
+
+Publish a GitHub release with a tag like `v0.1.2` (Releases, then Draft a new release). The `Release` workflow sets the package version from the tag, runs the full check, and publishes to npm with provenance. npm trusts the workflow directly (trusted publishing), so no token or 2FA code is involved. The version in `package.json` is only a placeholder between releases.
+
 ## License
 
 MIT
