@@ -2,25 +2,35 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { installAgentsMd } from "../client/agents-md.js";
 import { ApiClient } from "../client/api-client.js";
-import { installClaudeHook, parseClaudeEdit, uninstallClaudeHook } from "../client/claude-hook.js";
-import { ENV, saveConfig } from "../client/config.js";
+import { handleClaudeHook, parseClaudeHookPayload } from "../client/claude-events.js";
+import { installClaudeHooks, uninstallClaudeHooks } from "../client/claude-hook.js";
+import { ENV, removeConfig, saveConfig } from "../client/config.js";
 import { formatDoctor, runDoctor } from "../client/doctor.js";
 import { describeError, UsageError } from "../client/errors.js";
 import { Git } from "../client/git.js";
 import { type CliLocation, installHooks, uninstallHooks } from "../client/hooks.js";
 import { formatInviteLink, normalizeServerUrl, parseInviteLink } from "../client/invite-link.js";
-import { AGENT_INSTRUCTION, CODEX_SNIPPET, installMcpConfig, mcpConfigHasTeamroom } from "../client/mcp-config.js";
+import {
+  type AgentId,
+  CODEX_SNIPPET,
+  GENERIC_MCP_DESCRIPTION,
+  installMcpConfigs,
+  MCP_TARGETS,
+  mcpConfigHasTeamroom,
+  VIBE_SNIPPET,
+} from "../client/mcp-config.js";
 import {
   checkOverlap,
+  defaultMemberName,
   formatAge,
   formatOverlaps,
   openWorkspace,
   postNote,
-  reportEdit,
   reportWork,
+  requireShared,
 } from "../client/workspace.js";
-import { MAX_NAME_LENGTH } from "../core/schemas.js";
 import { runMcpServer } from "../mcp/server.js";
 import {
   DEFAULT_DATA_DIR,
@@ -39,42 +49,94 @@ const EXIT_USAGE = 2;
 const EXIT_OVERLAP_FOUND = 3;
 const DEFAULT_STATUS_LIMIT = 20;
 const ACTIVITY_SOURCES = ["human", "hook", "agent"] as const;
+const CLAUDE_HOOK_STDIN_TIMEOUT_MS = 2_000;
+/** Claude Code waits for these hooks, so a slow or unreachable server must give up fast. */
+const CLAUDE_HOOK_NETWORK_TIMEOUT_MS = 1_500;
 
-const HELP = `teamroom: know what your teammates (and their agents) are touching before the merge conflict does.
+const HELP = `teamroom: keep parallel coding agents out of each other's files.
 
-Setup
-  teamroom serve [--port ${DEFAULT_PORT}] [--host ${DEFAULT_HOST}] [--data-dir ${DEFAULT_DATA_DIR}] [--trust-proxy]
-  teamroom create --server <url> [--room-name <name>] [--name <you>] [--create-key <key>]
-  teamroom join '<invite link>' [--name <you>]
-  teamroom agents install           Let Claude Code and Codex use teamroom in this repo
-  teamroom hooks install | uninstall [--claude]   --claude also reports each file Claude Code edits
+Every worktree, clone and agent session shares what it is changing. Before an
+agent edits a file, it learns whether another session is already in it. Works
+with any MCP agent: Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe and others.
+
+Start (one command, no server, no account)
+  teamroom init [--agents codex,cursor,gemini]
+                                    Git hooks, MCP config for the agents this repo uses,
+                                    AGENTS.md instructions, and Claude Code hooks
   teamroom doctor                   Check the setup and say how to fix what is missing
 
 Daily use
-  teamroom check [files...]         Who else is touching these files (default: your pending changes)
-  teamroom report [--note <text>]   Share the files this checkout is changing
-  teamroom note <text> [--files a,b]
+  teamroom watch [--interval 3]     Live dashboard: every session, its agent, and the files in more than one place
+  teamroom check [files...]         Who else is changing these files (default: your pending changes)
+  teamroom note <text> [--files a,b]   Announce a plan before acting on it
+  teamroom report [--note <text>]   Share this checkout's changes now (hooks do it on commit and checkout)
   teamroom status [--limit ${DEFAULT_STATUS_LIMIT}]
-  teamroom watch [--interval 3]     Live dashboard: teammates, their agents, and what each is doing
   teamroom mcp                      Run the MCP server for coding agents (stdio)
 
-Room admin
-  teamroom invite rotate            Owner only. The old invite code stops working
+Share with teammates (optional, needs a server)
+  teamroom serve [--port ${DEFAULT_PORT}] [--host ${DEFAULT_HOST}] [--data-dir ${DEFAULT_DATA_DIR}] [--trust-proxy]
+  teamroom create --server <url> [--room-name <name>] [--name <you>] [--create-key <key>]
+  teamroom join '<invite link>' [--name <you>]
+  teamroom leave                    Back to local mode
+  teamroom invite rotate            Owner only. The old invite link stops working
   teamroom member remove <name>     Owner only, or yourself
   teamroom token rotate             Replace your token, for example after a leak
 
-Names default to your git user.name, the room name to the repo folder. create and join
-install the git hooks unless you pass --skip-hooks.
+Maintenance
+  teamroom hooks install | uninstall   Git hooks and Claude Code hooks only
 
-Server environment: PORT, HOST, TEAMROOM_DATA_DIR, TEAMROOM_TRUST_PROXY, and TEAMROOM_CREATE_KEY
-(when set, creating a room needs that key; joining with an invite link does not).
+Without a shared room, teamroom runs in local mode: the worktrees of this repo on
+this machine see each other through a file in the git directory. Names default to
+your git user.name. Lockfiles are ignored; add more patterns in .teamroomignore.
 
-Environment: TEAMROOM_SERVER, TEAMROOM_ROOM, TEAMROOM_MEMBER, TEAMROOM_TOKEN override the
-repo config. TEAMROOM_SESSION names this checkout (default: derived from its path).`;
+Environment: TEAMROOM_SESSION names this checkout (default: derived from its path).
+TEAMROOM_SERVER, TEAMROOM_ROOM, TEAMROOM_MEMBER, TEAMROOM_TOKEN override the shared-room config.
+Server: PORT, HOST, TEAMROOM_DATA_DIR, TEAMROOM_TRUST_PROXY, TEAMROOM_CREATE_KEY.`;
 
 type Command = (args: string[]) => Promise<number>;
 
+interface SetupSteps {
+  gitHooks: boolean;
+  claudeHooks: boolean;
+  mcp: boolean;
+  agentsMd: boolean;
+  /** Agents to configure even when the repo has no folder for them yet. */
+  agents?: AgentId[];
+}
+
+const CONFIGURABLE_AGENTS = MCP_TARGETS.map((target) => target.agent);
+
 const commands: Record<string, Command> = {
+  init: async (args) => {
+    const { values } = parseArgs({
+      args,
+      options: {
+        agents: { type: "string" },
+        "skip-hooks": { type: "boolean", default: false },
+        "skip-claude": { type: "boolean", default: false },
+        "skip-mcp": { type: "boolean", default: false },
+        "skip-agents-md": { type: "boolean", default: false },
+      },
+    });
+    const workspace = await openWorkspace(process.cwd());
+    await setUp(workspace.git, workspace.repoRoot, {
+      gitHooks: !values["skip-hooks"],
+      claudeHooks: !values["skip-claude"],
+      mcp: !values["skip-mcp"],
+      agentsMd: !values["skip-agents-md"],
+      agents: parseAgents(values.agents),
+    });
+    print(
+      workspace.mode === "local"
+        ? "\nLocal mode: every worktree of this repo on this machine now sees the others. Nothing leaves this machine."
+        : `\nShared mode: you are ${workspace.member} in a room on ${workspace.config?.server}.`
+    );
+    print("Try it: open two worktrees with an agent in each, then run `teamroom watch`.");
+    if (workspace.mode === "local")
+      print("To include teammates on other machines, see `teamroom --help` (Share with teammates).");
+    return EXIT_OK;
+  },
+
   serve: async (args) => {
     const { values } = parseArgs({
       args,
@@ -118,20 +180,25 @@ const commands: Record<string, Command> = {
     const serverInput = values.server ?? process.env[ENV.server];
     if (!serverInput) {
       throw new UsageError(
-        `--server is required. To try teamroom locally, run \`teamroom serve\` in another terminal and pass --server http://${DEFAULT_HOST}:${DEFAULT_PORT}.`
+        `--server is required. A shared room lives on a teamroom server (see \`teamroom serve\`). For worktrees on this machine only, \`teamroom init\` is enough.`
       );
     }
     const server = normalizeServerUrl(serverInput);
     const git = new Git(process.cwd());
     const [repoRoot, commonDir] = await Promise.all([git.repoRoot(), git.commonDir()]);
-    const name = await memberName(values.name, git);
+    const name = await defaultMemberName(git, values.name);
     const roomName = values["room-name"]?.trim() || path.basename(repoRoot);
 
     const createKey = values["create-key"] ?? process.env[SERVE_ENV.createKey];
     const created = await new ApiClient({ server }).createRoom(roomName, name, createKey);
     await saveConfig(commonDir, { server, roomId: created.room.id, member: created.me, token: created.token });
     print(`Created room "${created.room.name}". You are ${created.me}, the owner.`);
-    await finishSetup(git, repoRoot, { hooks: !values["skip-hooks"], agents: !values["skip-agents"] });
+    await setUp(git, repoRoot, {
+      gitHooks: !values["skip-hooks"],
+      claudeHooks: !values["skip-agents"],
+      mcp: !values["skip-agents"],
+      agentsMd: !values["skip-agents"],
+    });
 
     const link = formatInviteLink({ server, roomId: created.room.id, inviteCode: created.inviteCode });
     print("\nInvite teammates with this link. Anyone who has it can join, so share it privately:");
@@ -163,7 +230,7 @@ const commands: Record<string, Command> = {
         };
     const git = new Git(process.cwd());
     const [repoRoot, commonDir] = await Promise.all([git.repoRoot(), git.commonDir()]);
-    const name = await memberName(values.name, git);
+    const name = await defaultMemberName(git, values.name);
 
     const joined = await new ApiClient({ server: invite.server }).joinRoom(invite.roomId, name, invite.inviteCode);
     await saveConfig(commonDir, {
@@ -173,18 +240,30 @@ const commands: Record<string, Command> = {
       token: joined.token,
     });
     print(`Joined "${joined.room.name}" as ${joined.me}.`);
-    // .mcp.json is committed by whoever created the room, so joiners normally get it with the repo.
-    await finishSetup(git, repoRoot, { hooks: !values["skip-hooks"], agents: false });
-    if (!(await mcpConfigHasTeamroom(repoRoot).catch(() => false))) {
-      print("Tip: `teamroom agents install` lets Claude Code and Codex check overlap before they edit.");
-    }
+    // MCP configs and AGENTS.md are committed by whoever created the room, so joiners normally get them with the repo.
+    const hasMcp = await mcpConfigHasTeamroom(repoRoot).catch(() => false);
+    await setUp(git, repoRoot, {
+      gitHooks: !values["skip-hooks"],
+      claudeHooks: !values["skip-hooks"],
+      mcp: !hasMcp,
+      agentsMd: false,
+    });
     return EXIT_OK;
   },
 
-  agents: async (args) => {
-    if (args[0] !== "install") throw new UsageError("Use `teamroom agents install`.");
-    const repoRoot = await new Git(process.cwd()).repoRoot();
-    await setUpAgents(repoRoot);
+  leave: async () => {
+    const workspace = await openWorkspace(process.cwd());
+    const config = requireShared(workspace);
+    try {
+      await new ApiClient({ server: config.server, token: config.token, maxAttempts: 1 }).removeMember(
+        config.roomId,
+        config.member
+      );
+    } catch (error) {
+      print(`Could not remove you from the room on the server (${describeError(error)}). Leaving locally anyway.`);
+    }
+    await removeConfig(workspace.commonDir);
+    print("Left the shared room. This repo is back in local mode.");
     return EXIT_OK;
   },
 
@@ -195,41 +274,36 @@ const commands: Record<string, Command> = {
   },
 
   hooks: async (args) => {
-    const { values, positionals } = parseArgs({
-      args,
-      options: { claude: { type: "boolean", default: false } },
-      allowPositionals: true,
-    });
-    const [action] = positionals;
+    const [action] = args;
     if (action !== "install" && action !== "uninstall")
       throw new UsageError("Use `teamroom hooks install` or `uninstall`.");
     const git = new Git(process.cwd());
-    const hooksDir = await git.hooksDir();
-    const changes =
-      action === "install" ? await installHooks(hooksDir, await currentCli()) : await uninstallHooks(hooksDir);
-    for (const [hook, change] of Object.entries(changes)) print(`${hook}: ${change}`);
-    if (values.claude) {
-      const repoRoot = await git.repoRoot();
-      const claude =
-        action === "install"
-          ? await installClaudeHook(repoRoot, await currentCli())
-          : await uninstallClaudeHook(repoRoot);
-      print(`Claude Code PostToolUse: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
-      if (action === "install" && claude.change === "installed")
-        print("Restart Claude Code sessions in this repo to pick it up.");
+    const [hooksDir, repoRoot] = await Promise.all([git.hooksDir(), git.repoRoot()]);
+    const cli = await currentCli();
+    const changes = action === "install" ? await installHooks(hooksDir, cli) : await uninstallHooks(hooksDir);
+    for (const [hook, change] of Object.entries(changes)) print(`git ${hook}: ${change}`);
+    const claude =
+      action === "install" ? await installClaudeHooks(repoRoot, cli) : await uninstallClaudeHooks(repoRoot);
+    print(`Claude Code hooks: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
+    if (action === "install" && claude.change === "installed") {
+      print("Restart Claude Code sessions in this repo to pick them up.");
     }
     return EXIT_OK;
   },
 
-  // Called by Claude Code after each file edit. Silent and always succeeds: it must never get in Claude's way.
+  // Called by Claude Code at session start and around each file edit. Always exits 0: it must never get in Claude's way.
   "claude-hook": async () => {
     try {
-      const edit = parseClaudeEdit(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
-      if (!edit) return EXIT_OK;
-      const workspace = await openWorkspace(edit.cwd ?? process.cwd());
-      await reportEdit(workspace, { file: edit.file, agent: "claude-code" });
+      const payload = parseClaudeHookPayload(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
+      if (!payload) return EXIT_OK;
+      const workspace = await openWorkspace(payload.cwd ?? process.cwd(), {
+        timeoutMs: CLAUDE_HOOK_NETWORK_TIMEOUT_MS,
+        maxAttempts: 1,
+      });
+      const output = await handleClaudeHook(payload, workspace);
+      if (output) print(output);
     } catch {
-      // Not in a room, server down, or a file outside the repo: nothing to report.
+      // Not a git repo, server down, or a file outside the repo: nothing to say.
     }
     return EXIT_OK;
   },
@@ -291,11 +365,14 @@ const commands: Record<string, Command> = {
     const { values } = parseArgs({ args, options: { limit: { type: "string" } } });
     const limit = parseOptionalInt(values.limit, "--limit") ?? DEFAULT_STATUS_LIMIT;
     const workspace = await openWorkspace(process.cwd());
-    const { room, me } = await workspace.client.getRoom(workspace.config.roomId, limit);
-    print(`${room.name} (${room.id}), you are ${me}, session ${workspace.session}`);
-    print(
-      `Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`
-    );
+    const { room, me } = await workspace.backend.getRoom(limit);
+    const where = workspace.mode === "local" ? "local mode" : `shared room ${room.id}`;
+    print(`${room.name} (${where}), you are ${me}, session ${workspace.session}`);
+    if (workspace.mode === "shared") {
+      print(
+        `Members: ${room.members.map((member) => (member.role === "owner" ? `${member.name} (owner)` : member.name)).join(", ")}`
+      );
+    }
     if (room.activity.length === 0) {
       print("\nNo activity yet.");
       return EXIT_OK;
@@ -303,7 +380,8 @@ const commands: Record<string, Command> = {
     print("");
     for (const entry of [...room.activity].reverse()) {
       const files = entry.files.length > 0 ? ` [${entry.files.length} file(s)]` : "";
-      print(`${formatAge(entry.createdAt).padEnd(9)} ${entry.member} ${entry.kind}: ${entry.text}${files}`);
+      const session = entry.session ? ` (${entry.session})` : "";
+      print(`${formatAge(entry.createdAt).padEnd(9)} ${entry.member}${session} ${entry.kind}: ${entry.text}${files}`);
     }
     return EXIT_OK;
   },
@@ -319,15 +397,16 @@ const commands: Record<string, Command> = {
   },
 
   mcp: async () => {
-    await runMcpServer(() => openWorkspace(process.cwd()));
+    await runMcpServer(() => openWorkspace(process.cwd()), { autoReport: process.env[ENV.autoReport] !== "0" });
     return EXIT_OK;
   },
 
   invite: async (args) => {
     if (args[0] !== "rotate") throw new UsageError("Use `teamroom invite rotate`.");
-    const workspace = await openWorkspace(process.cwd());
-    const inviteCode = await workspace.client.rotateInvite(workspace.config.roomId);
-    const link = formatInviteLink({ server: workspace.config.server, roomId: workspace.config.roomId, inviteCode });
+    const config = requireShared(await openWorkspace(process.cwd()));
+    const client = new ApiClient({ server: config.server, token: config.token });
+    const inviteCode = await client.rotateInvite(config.roomId);
+    const link = formatInviteLink({ server: config.server, roomId: config.roomId, inviteCode });
     print("The old invite link no longer works. New one:");
     print(`  ${link}`);
     return EXIT_OK;
@@ -336,63 +415,82 @@ const commands: Record<string, Command> = {
   member: async (args) => {
     const [action, name] = args;
     if (action !== "remove" || !name) throw new UsageError("Use `teamroom member remove <name>`.");
-    const workspace = await openWorkspace(process.cwd());
-    await workspace.client.removeMember(workspace.config.roomId, name);
+    const config = requireShared(await openWorkspace(process.cwd()));
+    await new ApiClient({ server: config.server, token: config.token }).removeMember(config.roomId, name);
     print(`${name} was removed and their token revoked.`);
     return EXIT_OK;
   },
 
   token: async (args) => {
     if (args[0] !== "rotate") throw new UsageError("Use `teamroom token rotate`.");
-    const git = new Git(process.cwd());
-    const [workspace, commonDir] = await Promise.all([openWorkspace(process.cwd()), git.commonDir()]);
-    const token = await workspace.client.rotateToken(workspace.config.roomId);
-    const file = await saveConfig(commonDir, { ...workspace.config, token });
+    const workspace = await openWorkspace(process.cwd());
+    const config = requireShared(workspace);
+    const token = await new ApiClient({ server: config.server, token: config.token }).rotateToken(config.roomId);
+    const file = await saveConfig(workspace.commonDir, { ...config, token });
     print(`Token replaced and saved to ${file}. Update TEAMROOM_TOKEN anywhere you set it by hand.`);
     return EXIT_OK;
   },
 };
 
-async function finishSetup(git: Git, repoRoot: string, steps: { hooks: boolean; agents: boolean }): Promise<void> {
-  if (steps.hooks) {
-    await installHooks(await git.hooksDir(), await currentCli());
-    print("Installed git hooks: commits, checkouts, merges and rebases are now shared automatically.");
+async function setUp(git: Git, repoRoot: string, steps: SetupSteps): Promise<void> {
+  const cli = await currentCli();
+  if (steps.gitHooks) {
+    await installHooks(await git.hooksDir(), cli);
+    print("Git hooks: commits, checkouts, merges and rebases are shared automatically.");
   }
-  if (steps.agents) await setUpAgents(repoRoot);
-}
-
-async function setUpAgents(repoRoot: string): Promise<void> {
-  const { file, change } = await installMcpConfig(repoRoot);
-  const relative = path.relative(process.cwd(), file) || file;
-  if (change === "unchanged") {
-    print(`${relative} already lists the teamroom MCP server.`);
-  } else {
-    const verb = change === "created" ? "Created" : "Updated";
-    print(`${verb} ${relative} for Claude Code. Commit it so teammates get it too.`);
+  if (steps.mcp) await setUpMcp(repoRoot, steps.agents ?? []);
+  if (steps.agentsMd) {
+    const { file, change } = await installAgentsMd(repoRoot);
+    print(
+      `AGENTS.md (${change}): tells every agent to announce its plan and check before editing. ${relativeTo(file)}`
+    );
   }
-  print("\nCodex: add this to ~/.codex/config.toml");
-  print(indent(CODEX_SNIPPET));
-  print("\nTell your agents to use it, in AGENTS.md or CLAUDE.md:");
-  print(indent(AGENT_INSTRUCTION));
+  if (steps.claudeHooks) {
+    const { change } = await installClaudeHooks(repoRoot, cli);
+    print(
+      `Claude Code hooks (${change}): sessions are briefed on the others, and an edit to a file another session is changing is paused once with the details.`
+    );
+    if (change === "installed") print("  Restart Claude Code sessions in this repo to pick them up.");
+  }
 }
 
-/** Falls back to git's user.name, so most people never type --name. */
-async function memberName(explicit: string | undefined, git: Git): Promise<string> {
-  const fromGit = (await git.userName())?.replace(/@/g, "").trim().slice(0, MAX_NAME_LENGTH);
-  const candidate = explicit?.trim() || fromGit;
-  if (!candidate) throw new UsageError("--name is required (git has no user.name set).");
-  return candidate;
+async function setUpMcp(repoRoot: string, forced: AgentId[]): Promise<void> {
+  const results = await installMcpConfigs(repoRoot, forced);
+  for (const { label, file, change } of results) {
+    print(`MCP for ${label} (${change}): ${relativeTo(file)}`);
+  }
+  if (results.length > 0) print("  Commit these so everyone's agents get teamroom.");
+  const configured = new Set(results.map((result) => result.agent));
+  print("\nOther agents: the MCP server shares their changes as they work.");
+  if (!configured.has("codex"))
+    print(`  Codex, in ~/.codex/config.toml (or run init with --agents codex):\n${indent(CODEX_SNIPPET, 4)}`);
+  print(`  Mistral Vibe, in ~/.vibe/config.toml:\n${indent(VIBE_SNIPPET, 4)}`);
+  print(`  ${GENERIC_MCP_DESCRIPTION}`);
 }
 
-function indent(text: string): string {
+function parseAgents(raw: string | undefined): AgentId[] {
+  const requested = (raw ?? "")
+    .split(",")
+    .map((agent) => agent.trim().toLowerCase())
+    .filter(Boolean);
+  const unknown = requested.filter((agent) => !CONFIGURABLE_AGENTS.includes(agent as AgentId));
+  if (unknown.length > 0) {
+    throw new UsageError(`Unknown agent ${unknown.join(", ")}. Choose from ${CONFIGURABLE_AGENTS.join(", ")}.`);
+  }
+  return requested as AgentId[];
+}
+
+function relativeTo(file: string): string {
+  return path.relative(process.cwd(), file) || file;
+}
+
+function indent(text: string, spaces = 2): string {
+  const padding = " ".repeat(spaces);
   return text
     .split("\n")
-    .map((line) => `  ${line}`)
+    .map((line) => `${padding}${line}`)
     .join("\n");
 }
-
-/** npx runs from a throwaway cache, so pinning its path would break once the cache is cleared. */
-const CLAUDE_HOOK_STDIN_TIMEOUT_MS = 2_000;
 
 /** Reads all of stdin, giving up after `timeoutMs` so a hook never hangs when nothing is piped in. */
 async function readStdin(timeoutMs: number): Promise<string> {
@@ -406,6 +504,7 @@ async function readStdin(timeoutMs: number): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** npx runs from a throwaway cache, so pinning its path would break once the cache is cleared. */
 async function currentCli(): Promise<CliLocation | undefined> {
   const script = process.argv[1];
   if (!script) return undefined;

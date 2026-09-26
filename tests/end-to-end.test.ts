@@ -60,8 +60,8 @@ describe("two worktrees of one member", () => {
       token: created.token,
     });
 
-    worktreeA = await openWorkspace(path.join(tempDir, "a"), CLEAN_ENV);
-    worktreeB = await openWorkspace(path.join(tempDir, "b", "src"), CLEAN_ENV);
+    worktreeA = await openWorkspace(path.join(tempDir, "a"), { env: CLEAN_ENV });
+    worktreeB = await openWorkspace(path.join(tempDir, "b", "src"), { env: CLEAN_ENV });
   });
 
   afterAll(async () => {
@@ -70,7 +70,8 @@ describe("two worktrees of one member", () => {
   });
 
   it("should share one config across worktrees but give each its own session", () => {
-    expect(worktreeA.config.roomId).toBe(worktreeB.config.roomId);
+    expect(worktreeA.mode).toBe("shared");
+    expect(worktreeA.config?.roomId).toBe(worktreeB.config?.roomId);
     expect(worktreeA.session).not.toBe(worktreeB.session);
   });
 
@@ -112,19 +113,19 @@ describe("two worktrees of one member", () => {
     expect(check.overlaps).toEqual([]);
   });
 
-  it("should drop commit entries that are already merged into the default branch", async () => {
-    const mergedCommit = await git(worktreeA.repoRoot, "rev-parse", "main");
-    await worktreeA.client.postActivity(worktreeA.config.roomId, {
-      kind: "commit",
-      source: "hook",
+  it("should stop warning about an agent's edit once a newer snapshot leaves the file out", async () => {
+    await worktreeA.backend.postActivity({
+      kind: "edit",
+      source: "agent",
+      agent: "codex",
       session: worktreeA.session,
-      text: "old commit",
-      commit: mergedCommit,
+      text: "Codex edited src/user.ts",
       files: ["src/user.ts"],
     });
+    expect((await checkOverlap(worktreeB, { files: ["user.ts"] })).overlaps).toHaveLength(1);
 
-    const check = await checkOverlap(worktreeB, { files: ["user.ts"] });
+    await reportWork(worktreeA, { source: "hook" });
 
-    expect(check.overlaps).toEqual([]);
+    expect((await checkOverlap(worktreeB, { files: ["user.ts"] })).overlaps).toEqual([]);
   });
 });

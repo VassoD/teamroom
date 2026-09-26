@@ -11,7 +11,9 @@ export async function runDashboard(workspace: Workspace, pollIntervalMs?: number
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     throw new UsageError("`teamroom watch` needs an interactive terminal. Use `teamroom status` in scripts.");
   }
-  const fetchRoom: FetchRoom = () => workspace.client.getRoom(workspace.config.roomId, DASHBOARD_ACTIVITY_LIMIT);
-  const app = render(<DashboardApp fetchRoom={fetchRoom} pollIntervalMs={pollIntervalMs} />);
+  const fetchRoom: FetchRoom = () => workspace.backend.getRoom(DASHBOARD_ACTIVITY_LIMIT);
+  const app = render(
+    <DashboardApp fetchRoom={fetchRoom} pollIntervalMs={pollIntervalMs} isIgnored={workspace.isIgnored} />
+  );
   await app.waitUntilExit();
 }

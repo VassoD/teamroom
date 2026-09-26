@@ -2,15 +2,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseClaudeHookPayload } from "../src/client/claude-events.js";
 import {
   CLAUDE_SETTINGS_FILE,
   claudeHookCommand,
-  installClaudeHook,
-  parseClaudeEdit,
-  uninstallClaudeHook,
+  claudeHooksInstalled,
+  installClaudeHooks,
+  uninstallClaudeHooks,
 } from "../src/client/claude-hook.js";
 
-describe("parseClaudeEdit", () => {
+describe("parseClaudeHookPayload", () => {
   const payload = (overrides: Record<string, unknown>): string =>
     JSON.stringify({
       session_id: "abc",
@@ -22,31 +23,58 @@ describe("parseClaudeEdit", () => {
     });
 
   it("should read the edited file from an Edit payload", () => {
-    expect(parseClaudeEdit(payload({}))).toEqual({ cwd: "/repo", tool: "Edit", file: "/repo/src/theme.ts" });
+    expect(parseClaudeHookPayload(payload({}))).toEqual({
+      event: "PostToolUse",
+      sessionId: "abc",
+      cwd: "/repo",
+      tool: "Edit",
+      file: "/repo/src/theme.ts",
+    });
+  });
+
+  it("should read the file an edit is about to change", () => {
+    expect(parseClaudeHookPayload(payload({ hook_event_name: "PreToolUse" }))).toMatchObject({
+      event: "PreToolUse",
+      file: "/repo/src/theme.ts",
+    });
+  });
+
+  it("should read session starts", () => {
+    expect(parseClaudeHookPayload(payload({ hook_event_name: "SessionStart", tool_name: undefined }))).toEqual({
+      event: "SessionStart",
+      sessionId: "abc",
+      cwd: "/repo",
+    });
+  });
+
+  it("should treat payloads without an event name as PostToolUse, like older installs sent", () => {
+    expect(parseClaudeHookPayload(payload({ hook_event_name: undefined }))?.event).toBe("PostToolUse");
   });
 
   it("should read notebook edits", () => {
-    const edit = parseClaudeEdit(
+    const edit = parseClaudeHookPayload(
       payload({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/repo/a.ipynb" } })
     );
-    expect(edit?.file).toBe("/repo/a.ipynb");
+    expect(edit).toMatchObject({ file: "/repo/a.ipynb" });
   });
 
-  it("should ignore tools that do not edit files", () => {
-    expect(parseClaudeEdit(payload({ tool_name: "Bash", tool_input: { command: "ls" } }))).toBeNull();
+  it("should ignore tools that do not edit files, and events it does not handle", () => {
+    expect(parseClaudeHookPayload(payload({ tool_name: "Bash", tool_input: { command: "ls" } }))).toBeNull();
+    expect(parseClaudeHookPayload(payload({ hook_event_name: "Stop" }))).toBeNull();
   });
 
   it("should ignore malformed input", () => {
-    expect(parseClaudeEdit("not json")).toBeNull();
-    expect(parseClaudeEdit(JSON.stringify({ tool_input: {} }))).toBeNull();
+    expect(parseClaudeHookPayload("not json")).toBeNull();
+    expect(parseClaudeHookPayload(JSON.stringify({ tool_input: {} }))).toBeNull();
   });
 });
 
 describe("Claude Code hook install", () => {
   let repo: string;
   const settingsPath = (): string => path.join(repo, CLAUDE_SETTINGS_FILE);
-  const readSettings = async (): Promise<Record<string, unknown> & { hooks: { PostToolUse: unknown[] } }> =>
-    JSON.parse(await readFile(settingsPath(), "utf8"));
+  const readSettings = async (): Promise<
+    Record<string, unknown> & { hooks: { PostToolUse: unknown[]; PreToolUse: unknown[]; SessionStart: unknown[] } }
+  > => JSON.parse(await readFile(settingsPath(), "utf8"));
 
   beforeEach(async () => {
     repo = await mkdtemp(path.join(os.tmpdir(), "teamroom-claude-hook-"));
@@ -56,20 +84,37 @@ describe("Claude Code hook install", () => {
     await rm(repo, { recursive: true, force: true });
   });
 
-  it("should create settings.local.json with the hook", async () => {
-    expect((await installClaudeHook(repo)).change).toBe("installed");
+  it("should create settings.local.json with the session, pre-edit and post-edit hooks", async () => {
+    expect((await installClaudeHooks(repo)).change).toBe("installed");
     const settings = await readSettings();
-    expect(settings.hooks.PostToolUse).toEqual([
-      {
-        matcher: "Edit|Write|MultiEdit|NotebookEdit",
-        hooks: [{ type: "command", command: claudeHookCommand(), timeout: 10 }],
+    const hooks = [{ type: "command", command: claudeHookCommand(), timeout: 10 }];
+    const onEdits = [{ matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks }];
+    expect(settings.hooks).toEqual({ SessionStart: [{ hooks }], PreToolUse: onEdits, PostToolUse: onEdits });
+    expect(await claudeHooksInstalled(repo)).toEqual(["SessionStart", "PreToolUse", "PostToolUse"]);
+  });
+
+  it("should add the new hooks to an install that only had PostToolUse", async () => {
+    await mkdir(path.dirname(settingsPath()), { recursive: true });
+    const onlyPost = {
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: "Edit|Write|MultiEdit|NotebookEdit",
+            hooks: [{ type: "command", command: claudeHookCommand(), timeout: 10 }],
+          },
+        ],
       },
-    ]);
+    };
+    await writeFile(settingsPath(), JSON.stringify(onlyPost));
+
+    expect((await installClaudeHooks(repo)).change).toBe("installed");
+    expect(await claudeHooksInstalled(repo)).toEqual(["SessionStart", "PreToolUse", "PostToolUse"]);
+    expect((await readSettings()).hooks.PostToolUse).toHaveLength(1);
   });
 
   it("should be idempotent", async () => {
-    await installClaudeHook(repo);
-    expect((await installClaudeHook(repo)).change).toBe("unchanged");
+    await installClaudeHooks(repo);
+    expect((await installClaudeHooks(repo)).change).toBe("unchanged");
     expect((await readSettings()).hooks.PostToolUse).toHaveLength(1);
   });
 
@@ -81,25 +126,25 @@ describe("Claude Code hook install", () => {
     };
     await writeFile(settingsPath(), JSON.stringify(existing));
 
-    await installClaudeHook(repo);
+    await installClaudeHooks(repo);
     const settings = await readSettings();
     expect(settings.permissions).toEqual(existing.permissions);
     expect(settings.hooks.PostToolUse).toHaveLength(2);
 
-    await uninstallClaudeHook(repo);
+    await uninstallClaudeHooks(repo);
     expect(await readSettings()).toEqual(existing);
   });
 
   it("should refuse to overwrite a settings file it cannot parse", async () => {
     await mkdir(path.dirname(settingsPath()), { recursive: true });
     await writeFile(settingsPath(), "{ not json");
-    await expect(installClaudeHook(repo)).rejects.toThrow("not a JSON object");
+    await expect(installClaudeHooks(repo)).rejects.toThrow("not a JSON object");
     expect(await readFile(settingsPath(), "utf8")).toBe("{ not json");
   });
 
   it("should remove the hooks key entirely when teamroom was the only hook", async () => {
-    await installClaudeHook(repo);
-    expect((await uninstallClaudeHook(repo)).change).toBe("removed");
+    await installClaudeHooks(repo);
+    expect((await uninstallClaudeHooks(repo)).change).toBe("removed");
     expect(await readSettings()).toEqual({});
   });
 });

@@ -1,6 +1,10 @@
 import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
 import { promisify } from "node:util";
+import { agentsMdHasTeamroom } from "./agents-md.js";
 import { ApiClient } from "./api-client.js";
+import { localStoreDir } from "./backend.js";
+import { CLAUDE_HOOK_EVENTS, claudeHooksInstalled } from "./claude-hook.js";
 import { loadConfig } from "./config.js";
 import { describeError } from "./errors.js";
 import { Git } from "./git.js";
@@ -67,19 +71,52 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
           name: "Git hooks",
           status: "warn",
           detail: `Missing: ${missingHooks.join(", ")}. Your work is only shared when you run \`teamroom report\`.`,
-          fix: "teamroom hooks install",
+          fix: "teamroom init",
+        }
+  );
+
+  const claudeHooks = await claudeHooksInstalled(repoRoot);
+  const missingClaudeHooks = CLAUDE_HOOK_EVENTS.filter((event) => !claudeHooks.includes(event));
+  checks.push(
+    missingClaudeHooks.length === 0
+      ? {
+          name: "Claude Code hooks",
+          status: "ok",
+          detail: "Sessions are briefed and edits are checked before they happen.",
+        }
+      : {
+          name: "Claude Code hooks",
+          status: "warn",
+          detail: `Missing: ${missingClaudeHooks.join(", ")}. Only matters if you use Claude Code: it then checks overlap only when it thinks to.`,
+          fix: "teamroom init",
         }
   );
 
   const hasMcp = await mcpConfigHasTeamroom(repoRoot).catch(() => false);
   checks.push(
     hasMcp
-      ? { name: "Agent setup", status: "ok", detail: ".mcp.json lists the teamroom server." }
+      ? { name: "Agent setup", status: "ok", detail: "The teamroom MCP server is configured for this repo." }
       : {
           name: "Agent setup",
           status: "warn",
-          detail: "Claude Code will not see the teamroom tools in this repo.",
-          fix: "teamroom agents install",
+          detail: "Agents will not see the teamroom tools in this repo.",
+          fix: "teamroom init",
+        }
+  );
+
+  const hasAgentsMd = await agentsMdHasTeamroom(repoRoot).catch(() => false);
+  checks.push(
+    hasAgentsMd
+      ? {
+          name: "Agent instructions",
+          status: "ok",
+          detail: "AGENTS.md tells agents to announce plans and check overlap.",
+        }
+      : {
+          name: "Agent instructions",
+          status: "warn",
+          detail: "Agents without hooks (Codex, Cursor, Gemini CLI, Vibe) will not know to check before editing.",
+          fix: "teamroom init",
         }
   );
 
@@ -98,16 +135,38 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
   let config: Awaited<ReturnType<typeof loadConfig>>;
   try {
     config = await loadConfig(commonDir, env);
-    checks.push({ name: "Membership", status: "ok", detail: `${config.member} in ${config.roomId}` });
   } catch (error) {
     checks.push({
-      name: "Membership",
+      name: "Mode",
       status: "fail",
       detail: describeError(error),
-      fix: "teamroom join '<invite link>'",
+      fix: "teamroom leave (back to local mode), or teamroom join '<invite link>'",
     });
     return checks;
   }
+
+  if (!config) {
+    checks.push({
+      name: "Mode",
+      status: "ok",
+      detail: "Local: every worktree of this repo on this machine sees the others. No server involved.",
+    });
+    const storeDir = localStoreDir(commonDir);
+    try {
+      await fs.mkdir(storeDir, { recursive: true });
+      await fs.access(storeDir, fs.constants.W_OK);
+      checks.push({ name: "Local store", status: "ok", detail: storeDir });
+    } catch (error) {
+      checks.push({
+        name: "Local store",
+        status: "fail",
+        detail: describeError(error),
+        fix: `Make ${storeDir} writable by you.`,
+      });
+    }
+    return checks;
+  }
+  checks.push({ name: "Mode", status: "ok", detail: `Shared: ${config.member} in ${config.roomId}` });
 
   const client = new ApiClient({ server: config.server, token: config.token, maxAttempts: 1 });
   try {

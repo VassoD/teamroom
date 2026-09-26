@@ -6,12 +6,14 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { type ServerType, serve } from "@hono/node-server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { installAgentsMd } from "../src/client/agents-md.js";
 import { ApiClient } from "../src/client/api-client.js";
+import { installClaudeHooks } from "../src/client/claude-hook.js";
 import { saveConfig } from "../src/client/config.js";
 import { type DoctorCheck, formatDoctor, runDoctor } from "../src/client/doctor.js";
 import { Git } from "../src/client/git.js";
 import { installHooks } from "../src/client/hooks.js";
-import { installMcpConfig } from "../src/client/mcp-config.js";
+import { installMcpConfigs } from "../src/client/mcp-config.js";
 import { createApp } from "../src/server/app.js";
 import { MemoryRoomStore } from "../src/store/memory-store.js";
 
@@ -54,14 +56,17 @@ describe("teamroom doctor", () => {
     expect(checks).toEqual([expect.objectContaining({ name: "Git repository", status: "fail" })]);
   });
 
-  it("should point a fresh repo at join, with fixes for each warning", async () => {
+  it("should treat a fresh repo as local mode and point every warning at init", async () => {
     const checks = await runDoctor(repo, { env: CLEAN_ENV, commandOnPath: async () => false });
 
-    expect(statusOf(checks, "Membership")).toBe("fail");
+    expect(statusOf(checks, "Mode")).toBe("ok");
+    expect(statusOf(checks, "Local store")).toBe("ok");
     expect(statusOf(checks, "teamroom on PATH")).toBe("warn");
     expect(statusOf(checks, "Git hooks")).toBe("warn");
+    expect(statusOf(checks, "Claude Code hooks")).toBe("warn");
     expect(statusOf(checks, "Agent setup")).toBe("warn");
-    expect(formatDoctor(checks)).toContain("fix: teamroom hooks install");
+    expect(statusOf(checks, "Agent instructions")).toBe("warn");
+    expect(formatDoctor(checks)).toContain("fix: teamroom init");
     expect(checks.some((check) => check.name === "Server")).toBe(false);
   });
 
@@ -75,7 +80,9 @@ describe("teamroom doctor", () => {
       token: created.token,
     });
     await installHooks(await git.hooksDir());
-    await installMcpConfig(repo);
+    await installClaudeHooks(repo);
+    await installMcpConfigs(repo);
+    await installAgentsMd(repo);
     await execFileAsync(
       "git",
       [

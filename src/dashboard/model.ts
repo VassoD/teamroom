@@ -73,8 +73,16 @@ export function sessionKey(member: string, session: string | undefined): string 
   return `${member}/${session ?? "default"}`;
 }
 
-/** Turns the raw activity log into who is doing what, per member and per session. */
-export function buildDashboard(room: RoomView, me: string, now = new Date()): Dashboard {
+/**
+ * Turns the raw activity log into who is doing what, per member and per
+ * session. Ignored files (lockfiles and the like) are left out of the picture.
+ */
+export function buildDashboard(
+  room: RoomView,
+  me: string,
+  now = new Date(),
+  isIgnored: (file: string) => boolean = () => false
+): Dashboard {
   const nowMs = now.getTime();
   const byKey = new Map<string, Activity[]>();
   for (const entry of room.activity) {
@@ -115,7 +123,9 @@ export function buildDashboard(room: RoomView, me: string, now = new Date()): Da
       activeAgents: agents.filter((agent) => nowMs - (agentLastSeen.get(agent) ?? 0) <= ACTIVE_WINDOW_MS),
       edits,
       branch: latest.branch ?? latestSnapshot?.branch,
-      files: [...new Set([...(latestSnapshot?.files ?? []).map(normalizePath), ...editedSinceSnapshot])],
+      files: [...new Set([...(latestSnapshot?.files ?? []).map(normalizePath), ...editedSinceSnapshot])].filter(
+        (file) => !isIgnored(file)
+      ),
       doing: describing.text,
       lastSeen: latest.createdAt,
     });

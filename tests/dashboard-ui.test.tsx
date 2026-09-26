@@ -84,13 +84,13 @@ describe("DashboardApp", () => {
     expect(app.lastFrame()).toContain("bob in app-bbbbbb on main");
   });
 
-  it("should explain the problem when the room can't be reached", async () => {
+  it("should explain the problem when the room can't be read", async () => {
     const fetchRoom: FetchRoom = async () => {
       throw new Error("connect ECONNREFUSED");
     };
     const app = render(<DashboardApp fetchRoom={fetchRoom} fixedNow={NOW} pollIntervalMs={60_000} />);
     cleanup = app.unmount;
     await waitForRender();
-    expect(app.lastFrame()).toContain("Can't reach the room: connect ECONNREFUSED");
+    expect(app.lastFrame()).toContain("Can't read the room: connect ECONNREFUSED");
   });
 });

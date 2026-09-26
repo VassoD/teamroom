@@ -112,12 +112,6 @@ export class Git {
     return { branch, commit, baseRef: mergeBase ? baseRef : undefined, files };
   }
 
-  /** True when `commit` is already part of `ref`. Unknown commits count as not merged. */
-  async isMergedInto(commit: string, ref: string): Promise<boolean> {
-    const result = await this.run(["merge-base", "--is-ancestor", commit, ref], this.cwd);
-    return result.exitCode === 0;
-  }
-
   private async lines(args: string[]): Promise<string[]> {
     const result = await this.run(args, this.cwd);
     if (result.exitCode !== 0) return [];
