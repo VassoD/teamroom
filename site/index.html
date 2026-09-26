@@ -19,6 +19,7 @@
     --agent: #5B4BD6;
     --overlap: #F4C84A;
     --overlap-ink: #5A4300;
+    --mark-band: var(--overlap);
     --term: #16233A;
     --term-text: #DCE4EE;
     --term-dim: #8494AA;
@@ -37,6 +38,8 @@
       --agent: #9489F2;
       --overlap: #F4C84A;
       --overlap-ink: #2A1F00;
+      /* Light headline text needs a deeper band than the bright highlight to stay legible. */
+      --mark-band: color-mix(in srgb, var(--overlap) 40%, var(--paper));
       --term: #0C1320;
       --term-text: #DCE4EE;
       --term-dim: #71829A;
@@ -53,6 +56,8 @@
   }
   a { color: inherit; text-underline-offset: 3px; }
   :focus-visible { outline: 3px solid var(--agent); outline-offset: 3px; border-radius: 2px; }
+  ::selection { background: color-mix(in srgb, var(--overlap) 65%, transparent); color: var(--ink); }
+  a { text-underline-offset: 3px; }
   code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
   code { font-size: 0.88em; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-chip); padding: 0.05em 0.35em; }
 
@@ -80,7 +85,7 @@
   .hero h1 mark {
     background: none;
     color: inherit;
-    background-image: linear-gradient(var(--overlap), var(--overlap));
+    background-image: linear-gradient(var(--mark-band), var(--mark-band));
     background-repeat: no-repeat;
     background-size: 100% 0.32em;
     background-position: 0 88%;
@@ -97,6 +102,7 @@
   }
   @media (max-width: 900px) { .panes { grid-template-columns: minmax(0, 1fr); } }
   .pane { background: var(--term); color: var(--term-text); border-radius: var(--radius-panel); overflow: hidden; display: flex; flex-direction: column; min-height: 300px; }
+  @media (max-width: 900px) { .pane { min-height: 190px; } }
   .pane header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid color-mix(in srgb, var(--term-text) 12%, transparent); font-weight: 700; font-size: 15px; }
   .pane header small { font-weight: 400; color: var(--term-dim); font-size: 13px; }
   .who { width: 12px; height: 12px; border-radius: 50%; flex: none; }
@@ -145,7 +151,7 @@
 
   /* Sections */
   section.block { padding: 72px 0 8px; }
-  section.block h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 14px; font-weight: 800; max-width: 22ch; }
+  section.block h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 14px; font-weight: 800; max-width: 30ch; text-wrap: balance; }
   section.block > .wrap > p { max-width: var(--measure); color: var(--muted); margin: 0 0 28px; }
 
   .nets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border-top: 2px solid var(--ink); }
@@ -182,17 +188,19 @@
   .shared h3 { margin: 0 0 6px; font-size: 19px; }
   .shared p { margin: 0; color: var(--muted); }
   .kind { display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 13px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-chip); margin-bottom: 10px; border: 1.5px solid var(--ink); }
-  .never { margin-top: 34px; padding: 18px 20px; border-left: 4px solid var(--ink); background: var(--surface); max-width: var(--measure); }
+  .never { margin-top: 34px; padding: 18px 20px; border: 1px solid var(--rule); border-radius: var(--radius-panel); background: var(--surface); max-width: var(--measure); }
   .never p { margin: 0; }
 
   .steps { counter-reset: step; list-style: none; padding: 0; margin: 0; display: grid; gap: 22px; max-width: 780px; }
   .steps li { counter-increment: step; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 4px 14px; }
-  .steps li::before { content: counter(step); grid-row: span 2; width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--ink); display: grid; place-items: center; font-weight: 800; }
+  .steps li > * { grid-column: 2; }
+  .steps li::before { content: counter(step); grid-column: 1; grid-row: 1 / span 3; align-self: start; width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--ink); display: grid; place-items: center; font-weight: 800; }
   .steps h3 { margin: 4px 0 6px; font-size: 18px; }
   .steps pre { margin: 0; background: var(--term); color: var(--term-text); border-radius: var(--radius-panel); padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.6; }
   .steps pre code { background: none; border: 0; padding: 0; font-size: inherit; color: inherit; }
   .steps pre .c { color: var(--term-dim); }
-  .steps p { margin: 0 0 8px; color: var(--muted); }
+  @media (max-width: 600px) { .steps pre { font-size: 12.5px; padding: 12px 14px; } }
+  .steps p { margin: 10px 0 0; color: var(--muted); max-width: 62ch; }
 
   footer { margin-top: 90px; padding: 28px 0 48px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 15px; }
   footer p { margin: 0 0 8px; max-width: var(--measure); }
@@ -248,7 +256,7 @@
     <div class="nets">
       <div class="net hook">
         <h3><i class="who alice" aria-hidden="true"></i>Git hooks</h3>
-        <p class="verdict">Always runs. Git calls it, not the model.</p>
+        <p class="verdict">Always runs. Git calls it.</p>
         <ul>
           <li>Fires after every commit, checkout, merge and rebase.</li>
           <li>Shares every file this checkout has changed compared with <code>main</code>, including uncommitted and untracked ones.</li>
@@ -257,7 +265,7 @@
       </div>
       <div class="net mcp">
         <h3><i class="who agent" aria-hidden="true"></i>MCP server</h3>
-        <p class="verdict">Any agent. Runs for as long as the agent does.</p>
+        <p class="verdict">Any agent, all session long.</p>
         <ul>
           <li>Shares the checkout's changes every few seconds while the agent works, without being asked.</li>
           <li>When another session starts changing the same file, the next tool result opens with a heads-up.</li>
@@ -266,7 +274,7 @@
       </div>
       <div class="net hook">
         <h3><i class="who alice" aria-hidden="true"></i>Claude Code hooks</h3>
-        <p class="verdict">Enforced by Claude Code, not left to the model.</p>
+        <p class="verdict">Enforced by Claude Code.</p>
         <ul>
           <li>A new session is briefed on what the other sessions are changing.</li>
           <li>An edit to a file someone else is in is paused once, with who and why. The retry goes through.</li>
@@ -284,7 +292,7 @@
     <p>By default the room is a file in your repo's <code>.git</code> directory, which every worktree shares. No server, no account, nothing leaves your machine. To include teammates on other machines, point the repo at a small shared server instead.</p>
 
     <div class="diagram">
-      <svg viewBox="0 0 900 300" role="img" aria-labelledby="diagram-title">
+      <svg viewBox="0 44 900 212" role="img" aria-labelledby="diagram-title">
         <title id="diagram-title">Worktree 1 reports its changes through git hooks and its agent's MCP server to a room file in .git. The agent in worktree 2 checks the same file before editing.</title>
         <rect class="box" x="20" y="60" width="240" height="180" rx="10"/>
         <text x="40" y="96" font-size="18" font-weight="700">Worktree 1</text>
@@ -319,8 +327,8 @@
         </defs>
       </svg>
       <div class="legend">
-        <span><i class="solid" aria-hidden="true"></i>Guaranteed: hooks and the MCP server</span>
-        <span><i class="dashed" aria-hidden="true"></i>Requested: tools the agent calls</span>
+        <span><i class="solid" aria-hidden="true"></i>Automatic: hooks and background reports</span>
+        <span><i class="dashed" aria-hidden="true"></i>On request: tools the agent calls</span>
       </div>
     </div>
   </div>
@@ -361,21 +369,24 @@
       <li>
         <h3>Install</h3>
         <pre><code>npm install --global teamroom</code></pre>
+        <p>Hooks and agent configs launch <code>teamroom</code> by name, so it needs to be on your PATH.</p>
       </li>
       <li>
         <h3>Set up your repo, once</h3>
         <pre><code>teamroom init</code></pre>
-        <p>Installs the git hooks, writes MCP config for the agents it finds (Claude Code, Cursor, Gemini CLI, Codex), adds instructions to <code>AGENTS.md</code>, and installs the Claude Code hooks. Commit what it wrote.</p>
+        <p>Adds git hooks, MCP config for the agents it finds, an <code>AGENTS.md</code> block and the Claude Code hooks. Commit what it wrote.</p>
       </li>
       <li>
         <h3>Give each agent its own worktree</h3>
         <pre><code>git worktree add ../app-header -b feat/header
-cd ../app-header &amp;&amp; codex    <span class="c"># or claude, gemini, vibe, cursor…</span></code></pre>
+cd ../app-header &amp;&amp; codex   <span class="c"># or claude, gemini, vibe</span></code></pre>
+        <p>Each worktree is its own session. Worktrees you add later are set up automatically.</p>
       </li>
       <li>
         <h3>Watch them work</h3>
-        <pre><code>teamroom watch            <span class="c"># every session, its agent, files in more than one place</span>
-teamroom check src/theme.ts</code></pre>
+        <pre><code>teamroom watch                <span class="c"># every session, live</span>
+teamroom check src/theme.ts   <span class="c"># who else is in this file</span></code></pre>
+        <p>Agents get their warnings on their own. These are for you.</p>
       </li>
       <li>
         <h3>Optional: bring in teammates</h3>
@@ -507,9 +518,9 @@ teamroom join '&lt;invite link&gt;'   <span class="c"># on their machines</span>
       }
     }
 
-    if (!panes.alice.childElementCount) empty(panes.alice, "Idle.");
+    if (!panes.alice.childElementCount) empty(panes.alice, "No agent running yet.");
     if (!panes.room.childElementCount) empty(panes.room, "No activity yet.");
-    if (!panes.agent.childElementCount) empty(panes.agent, "No session yet.");
+    if (!panes.agent.childElementCount) empty(panes.agent, "No agent running yet.");
 
     [...progress.children].forEach((bar, index) => bar.classList.toggle("on", index < stepCount));
     backButton.disabled = stepCount === 0;
