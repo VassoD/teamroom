@@ -5,6 +5,7 @@ import { checkOverlap, formatAge, formatOverlaps, postNote, reportWork, type Wor
 import { agentLabel, normalizeAgentId } from "../core/agents.js";
 import { MAX_ACTIVITY_KEPT } from "../core/room.js";
 import { MAX_OVERLAP_WINDOW_HOURS, MAX_TEXT_LENGTH } from "../core/schemas.js";
+import { PACKAGE_VERSION } from "../version.js";
 
 /**
  * A minimal MCP server over stdio (newline-delimited JSON-RPC 2.0). Teamroom
@@ -13,7 +14,7 @@ import { MAX_OVERLAP_WINDOW_HOURS, MAX_TEXT_LENGTH } from "../core/schemas.js";
  */
 
 export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const SERVER_INFO = { name: "teamroom", version: "0.1.0" };
+const SERVER_INFO = { name: "teamroom", version: PACKAGE_VERSION };
 const DEFAULT_RECENT_LIMIT = 20;
 
 const JSON_RPC_PARSE_ERROR = -32700;
