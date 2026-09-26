@@ -148,11 +148,11 @@
   section.block h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 14px; font-weight: 800; max-width: 22ch; }
   section.block > .wrap > p { max-width: var(--measure); color: var(--muted); margin: 0 0 28px; }
 
-  .nets { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 2px solid var(--ink); }
-  @media (max-width: 760px) { .nets { grid-template-columns: 1fr; } }
+  .nets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border-top: 2px solid var(--ink); }
+  @media (max-width: 900px) { .nets { grid-template-columns: 1fr; } }
   .net { padding: 22px 28px 26px 0; }
   .net + .net { padding-left: 28px; border-left: 1px solid var(--rule); }
-  @media (max-width: 760px) { .net + .net { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); } }
+  @media (max-width: 900px) { .net + .net { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); } }
   .net h3 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
   .net .verdict { font-weight: 700; margin: 0 0 12px; }
   .net.hook .verdict { color: var(--alice); }
@@ -211,22 +211,22 @@
   </header>
 
   <section class="hero">
-    <h1>Find out before the <mark>merge conflict</mark> does.</h1>
-    <p>teamroom tells you, and your coding agent, which files your teammates are changing right now. Before you touch them.</p>
+    <h1>Run agents in parallel. <mark>Skip the merge conflicts.</mark></h1>
+    <p>teamroom tells every coding agent which files the others are changing, before it edits them. Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe, or any agent that speaks MCP. One command, no server.</p>
   </section>
 
-  <section class="replay" aria-label="Replay: how teamroom catches a conflict">
+  <section class="replay" aria-label="Replay: how teamroom keeps two agents apart">
     <div class="panes">
       <div class="pane">
-        <header><i class="who alice" aria-hidden="true"></i>Alice <small>terminal, feat/theme</small></header>
+        <header><i class="who alice" aria-hidden="true"></i>Worktree 1 <small>Codex, feat/theme</small></header>
         <div class="body" id="pane-alice" aria-live="polite"></div>
       </div>
       <div class="pane room">
-        <header><i class="who room" aria-hidden="true"></i>The room <small>shared by the team</small></header>
+        <header><i class="who room" aria-hidden="true"></i>The room <small>.git/teamroom, this machine</small></header>
         <div class="body" id="pane-room" aria-live="polite"></div>
       </div>
       <div class="pane">
-        <header><i class="who agent" aria-hidden="true"></i>Bob's agent <small>Claude Code, main</small></header>
+        <header><i class="who agent" aria-hidden="true"></i>Worktree 2 <small>Claude Code, feat/header</small></header>
         <div class="body" id="pane-agent" aria-live="polite"></div>
       </div>
     </div>
@@ -234,7 +234,7 @@
     <div class="controls">
       <button type="button" class="secondary" id="btn-back">Back</button>
       <button type="button" id="btn-next">Start the replay</button>
-      <p class="caption" id="caption"><strong id="caption-step">Five steps, about a minute</strong><span id="caption-text">Alice and Bob are about to edit the same file. Neither knows yet.</span></p>
+      <p class="caption" id="caption"><strong id="caption-step">Five steps, about a minute</strong><span id="caption-text">Two agents, two worktrees, one repo. They are about to need the same file.</span></p>
       <div class="progress" id="progress" aria-hidden="true"></div>
     </div>
   </section>
@@ -242,8 +242,8 @@
 
 <section class="block" id="how">
   <div class="wrap">
-    <h2>Two safety nets, trusted differently</h2>
-    <p>Everything teamroom knows arrives through one of two doors. One is guaranteed. The other depends on the model.</p>
+    <h2>Three safety nets, trusted differently</h2>
+    <p>Everything teamroom knows arrives through one of three doors. Two run whatever the model does. One works with every agent.</p>
 
     <div class="nets">
       <div class="net hook">
@@ -251,51 +251,60 @@
         <p class="verdict">Always runs. Git calls it, not the model.</p>
         <ul>
           <li>Fires after every commit, checkout, merge and rebase.</li>
-          <li>Sends the list of files this checkout has changed compared with <code>main</code>, including uncommitted and untracked ones.</li>
-          <li>Runs in the background. If the server is down, your commit still goes through.</li>
+          <li>Shares every file this checkout has changed compared with <code>main</code>, including uncommitted and untracked ones.</li>
+          <li>Runs in the background. Nothing it does can fail a commit.</li>
         </ul>
       </div>
       <div class="net mcp">
-        <h3><i class="who agent" aria-hidden="true"></i>MCP tools</h3>
-        <p class="verdict">Runs when the agent decides to call it.</p>
+        <h3><i class="who agent" aria-hidden="true"></i>MCP server</h3>
+        <p class="verdict">Any agent. Runs for as long as the agent does.</p>
         <ul>
-          <li><code>teamroom_check_overlap</code> asks who else is touching these files.</li>
-          <li><code>teamroom_report_work</code> and <code>teamroom_post_note</code> share what the agent is doing.</li>
-          <li><code>teamroom_recent_activity</code> reads the room before starting.</li>
+          <li>Shares the checkout's changes every few seconds while the agent works, without being asked.</li>
+          <li>When another session starts changing the same file, the next tool result opens with a heads-up.</li>
+          <li><code>teamroom_post_note</code> announces a plan, <code>teamroom_check_overlap</code> asks before editing.</li>
+        </ul>
+      </div>
+      <div class="net hook">
+        <h3><i class="who alice" aria-hidden="true"></i>Claude Code hooks</h3>
+        <p class="verdict">Enforced by Claude Code, not left to the model.</p>
+        <ul>
+          <li>A new session is briefed on what the other sessions are changing.</li>
+          <li>An edit to a file someone else is in is paused once, with who and why. The retry goes through.</li>
+          <li>Every edit is shared the moment it happens.</li>
         </ul>
       </div>
     </div>
-    <p class="pullquote">The hook is enforced. The tools are a request. The room stays accurate even when an agent ignores its instructions.</p>
+    <p class="pullquote">Hooks are enforced. Tools are a request. The room stays accurate even when an agent ignores its instructions.</p>
   </div>
 </section>
 
 <section class="block">
   <div class="wrap">
     <h2>Where everything lives</h2>
-    <p>A small server holds the room. Each checkout talks to it through the hooks and the CLI. Each agent talks to it through the MCP server running on the same machine.</p>
+    <p>By default the room is a file in your repo's <code>.git</code> directory, which every worktree shares. No server, no account, nothing leaves your machine. To include teammates on other machines, point the repo at a small shared server instead.</p>
 
     <div class="diagram">
       <svg viewBox="0 0 900 300" role="img" aria-labelledby="diagram-title">
-        <title id="diagram-title">Alice's checkout sends reports through git hooks to the teamroom server. Bob's agent asks the server through MCP tools.</title>
+        <title id="diagram-title">Worktree 1 reports its changes through git hooks and its agent's MCP server to a room file in .git. The agent in worktree 2 checks the same file before editing.</title>
         <rect class="box" x="20" y="60" width="240" height="180" rx="10"/>
-        <text x="40" y="96" font-size="18" font-weight="700">Alice's checkout</text>
-        <text class="sub" x="40" y="120">feat/theme</text>
-        <text class="mono-t" x="40" y="160">.git/hooks/post-commit</text>
-        <text class="mono-t" x="40" y="182">.git/hooks/post-checkout</text>
-        <text class="mono-t" x="40" y="204">.git/teamroom.json</text>
+        <text x="40" y="96" font-size="18" font-weight="700">Worktree 1</text>
+        <text class="sub" x="40" y="120">Codex, feat/theme</text>
+        <text class="mono-t" x="40" y="160">post-commit hook</text>
+        <text class="mono-t" x="40" y="182">teamroom mcp</text>
+        <text class="mono-t" x="40" y="204">AGENTS.md</text>
 
         <rect class="room-box" x="330" y="80" width="240" height="140" rx="10"/>
-        <text x="350" y="116" font-size="18" font-weight="700">teamroom server</text>
-        <text class="sub" x="350" y="140">rooms, members, activity</text>
-        <text class="mono-t" x="350" y="180">teamroom serve</text>
-        <text class="mono-t" x="350" y="202">one JSON file per room</text>
+        <text x="350" y="116" font-size="18" font-weight="700">The room</text>
+        <text class="sub" x="350" y="140">sessions, files, plans</text>
+        <text class="mono-t" x="350" y="180">.git/teamroom/</text>
+        <text class="mono-t" x="350" y="202">or a shared server</text>
 
         <rect class="box" x="640" y="60" width="240" height="180" rx="10"/>
-        <text x="660" y="96" font-size="18" font-weight="700">Bob's agent</text>
-        <text class="sub" x="660" y="120">main</text>
-        <text class="mono-t" x="660" y="160">teamroom mcp</text>
-        <text class="mono-t" x="660" y="182">stdio, on Bob's machine</text>
-        <text class="mono-t" x="660" y="204">.git/teamroom.json</text>
+        <text x="660" y="96" font-size="18" font-weight="700">Worktree 2</text>
+        <text class="sub" x="660" y="120">Claude Code, feat/header</text>
+        <text class="mono-t" x="660" y="160">pre-edit hook</text>
+        <text class="mono-t" x="660" y="182">teamroom mcp</text>
+        <text class="mono-t" x="660" y="204">session briefing</text>
 
         <path class="edge-alice" d="M260 150 H322" marker-end="url(#arrow-alice)"/>
         <text class="lbl-alice" x="268" y="140">report</text>
@@ -310,8 +319,8 @@
         </defs>
       </svg>
       <div class="legend">
-        <span><i class="solid" aria-hidden="true"></i>Guaranteed: sent by git hooks</span>
-        <span><i class="dashed" aria-hidden="true"></i>Requested: called by the agent</span>
+        <span><i class="solid" aria-hidden="true"></i>Guaranteed: hooks and the MCP server</span>
+        <span><i class="dashed" aria-hidden="true"></i>Requested: tools the agent calls</span>
       </div>
     </div>
   </div>
@@ -320,7 +329,7 @@
 <section class="block">
   <div class="wrap">
     <h2>What the room sees</h2>
-    <p>Three kinds of entries. Each one carries a name, a branch and a list of file paths.</p>
+    <p>Three kinds of entries. Each one carries a session, a branch, the agent that sent it, and a list of file paths.</p>
     <div class="shared">
       <div>
         <span class="kind">wip</span>
@@ -328,18 +337,18 @@
         <p>Every file a checkout has changed but not merged yet. A new snapshot from the same checkout replaces the old one, so finished work stops showing up.</p>
       </div>
       <div>
-        <span class="kind">commit</span>
-        <h3>Commits</h3>
-        <p>The files one commit changed. Once that commit is on <code>main</code>, it no longer counts as overlap. It can't conflict anymore.</p>
+        <span class="kind">edit</span>
+        <h3>Agent edits</h3>
+        <p>A file an agent just edited, sent by its hook the moment it happens. The session's next snapshot replaces it, so reverted edits stop counting.</p>
       </div>
       <div>
         <span class="kind">note</span>
-        <h3>Notes</h3>
-        <p>A sentence from a person or an agent, like "about to refactor auth/". Optionally tied to files.</p>
+        <h3>Plans</h3>
+        <p>What an agent or a person is about to do, like "renaming User to Account", with the files it expects to touch. Other agents are warned before they edit them.</p>
       </div>
     </div>
     <div class="never">
-      <p><strong>File contents never leave your machine.</strong> The room gets paths, branch names, commit ids and short messages. Tokens are stored hashed on the server and kept in <code>.git/teamroom.json</code> on yours, readable only by you.</p>
+      <p><strong>File contents are never shared.</strong> In local mode nothing leaves your machine at all. A shared server gets paths, branch names, commit ids and short messages; tokens are stored hashed there and kept in <code>.git/teamroom.json</code> on yours, readable only by you. Lockfiles are left out of overlap, and <code>.teamroomignore</code> leaves out more.</p>
     </div>
   </div>
 </section>
@@ -347,33 +356,32 @@
 <section class="block" id="start">
   <div class="wrap">
     <h2>Get started</h2>
-    <p>You need Node 20 or newer and a server your team can reach.</p>
+    <p>You need Node 22 or newer and git. No server, no account.</p>
     <ol class="steps">
       <li>
-        <h3>Start a server</h3>
-        <pre><code>npx teamroom serve --host 0.0.0.0 --port 8787</code></pre>
+        <h3>Install</h3>
+        <pre><code>npm install --global teamroom</code></pre>
       </li>
       <li>
-        <h3>Create a room from your repo</h3>
-        <pre><code>teamroom create --server http://your-server:8787 \
-  --room-name "Dark mode" --name alice
-teamroom hooks install</code></pre>
+        <h3>Set up your repo, once</h3>
+        <pre><code>teamroom init</code></pre>
+        <p>Installs the git hooks, writes MCP config for the agents it finds (Claude Code, Cursor, Gemini CLI, Codex), adds instructions to <code>AGENTS.md</code>, and installs the Claude Code hooks. Commit what it wrote.</p>
       </li>
       <li>
-        <h3>Teammates join with the command it prints</h3>
-        <pre><code>teamroom join --server http://your-server:8787 \
-  --room room_… --invite tri_… --name bob
-teamroom hooks install</code></pre>
+        <h3>Give each agent its own worktree</h3>
+        <pre><code>git worktree add ../app-header -b feat/header
+cd ../app-header &amp;&amp; codex    <span class="c"># or claude, gemini, vibe, cursor…</span></code></pre>
       </li>
       <li>
-        <h3>Give your agent the tools</h3>
-        <pre><code>claude mcp add teamroom -- teamroom mcp
-codex mcp add teamroom -- teamroom mcp</code></pre>
-      </li>
-      <li>
-        <h3>Check before you edit</h3>
-        <pre><code>teamroom check            <span class="c"># your pending changes</span>
+        <h3>Watch them work</h3>
+        <pre><code>teamroom watch            <span class="c"># every session, its agent, files in more than one place</span>
 teamroom check src/theme.ts</code></pre>
+      </li>
+      <li>
+        <h3>Optional: bring in teammates</h3>
+        <pre><code>teamroom create --server https://teamroom.example.com
+teamroom join '&lt;invite link&gt;'   <span class="c"># on their machines</span></code></pre>
+        <p>Needs a server your team can reach: <code>teamroom serve</code>, or the Docker image on Fly.io.</p>
       </li>
     </ol>
   </div>
@@ -382,64 +390,63 @@ teamroom check src/theme.ts</code></pre>
 <footer>
   <div class="wrap">
     <p>teamroom is MIT licensed. It grew out of Codex Team Brief, built at a Codex hackathon by Vasiliki Doropoulou and Amit Agarwal.</p>
-    <p>The idea behind the two safety nets: <a href="https://vassi.fyi/writing/the-commit-that-talks-before-you-push">The Commit That Talks Before You Push</a>.</p>
+    <p>The idea behind the safety nets: <a href="https://vassi.fyi/writing/the-commit-that-talks-before-you-push">The Commit That Talks Before You Push</a>.</p>
   </div>
 </footer>
 
 <script>
   const STEPS = [
     {
-      title: "Alice starts a change",
-      text: "Alice edits the theme on her branch. The moment she switches branch or commits, a git hook reports her changed files to the room. Nobody asked it to.",
+      title: "Codex announces its plan",
+      text: "In the first worktree, Codex gets a task. Its instructions in AGENTS.md tell it to announce the plan first, so the room knows which files it is about to change.",
       alice: [
-        { cls: "cmd", text: "git switch -c feat/theme" },
-        { cls: "cmd", text: "vim src/theme.ts src/tokens.css" },
-        { cls: "cmd", text: 'git commit -am "feat: dark palette"' },
-        { cls: "dim", text: "[feat/theme 4e1c2a9] feat: dark palette" },
-        { cls: "dim", text: "# the hook reports in the background, silently" },
+        { cls: "say", text: "You: Add a dark palette to the theme." },
+        { cls: "tool", text: "▸ teamroom_post_note" },
+        { cls: "dim", text: '  "Adding a dark palette", files: ["src/theme.ts", "src/tokens.css"]' },
+        { cls: "dim", text: "# edits start; the MCP server shares them every few seconds" },
       ],
       room: [
-        { who: "alice", html: '<b>alice</b> is changing <span class="file-chip">src/theme.ts</span> <span class="file-chip">src/tokens.css</span><span class="meta">wip, feat/theme, just now</span>' },
+        { who: "alice", html: '<b>feat/theme</b> via Codex is changing <span class="file-chip">src/theme.ts</span> <span class="file-chip">src/tokens.css</span><span class="meta">plan, worktree 1, just now</span>' },
       ],
     },
     {
-      title: "Bob gives his agent a task",
-      text: "On another machine, Bob asks Claude Code to restyle the header. The agent plans its edits, and one of them is the same theme file.",
+      title: "Claude Code starts next door",
+      text: "In a second worktree, Claude Code starts a session. A hook briefs it on what the other session is changing before it plans anything.",
       agent: [
-        { cls: "say", text: "Bob: Make the header use the new brand blue." },
+        { cls: "dim", text: "teamroom: 1 other session is changing files:\n  - feat/theme (Codex): src/theme.ts, src/tokens.css" },
+        { cls: "say", text: "You: Make the header use the new brand blue." },
         { cls: "dim", text: "Plan: edit src/header.tsx and src/theme.ts" },
       ],
     },
     {
-      title: "The agent asks the room first",
-      text: "The agent calls an MCP tool before editing. This is the part that depends on the model: the tool only runs if the agent decides to call it.",
+      title: "The risky edit is paused",
+      text: "Claude reaches for src/theme.ts. A hook that runs before every edit pauses it once, with who is in the file and why. This does not depend on the model remembering to ask.",
       agent: [
-        { cls: "tool", text: "▸ teamroom_check_overlap" },
-        { cls: "dim", text: '  files: ["src/header.tsx", "src/theme.ts"]' },
+        { cls: "tool", text: "▸ Edit src/theme.ts" },
+        { cls: "warn", text: "Paused by teamroom: src/theme.ts is also being changed\n  - feat/theme via Codex, plan 2m ago: Adding a dark palette" },
       ],
       hot: true,
     },
     {
-      title: "The room answers",
-      text: "Alice changed src/theme.ts a few minutes ago, on a branch that isn't merged yet. The agent stops and tells Bob instead of editing blind.",
+      title: "The agent adapts",
+      text: "Instead of editing blind, Claude tells you and keeps to the header. Agents without hooks get the same answer from teamroom_check_overlap, and a heads-up in their next tool result.",
       agent: [
-        { cls: "warn", text: "src/theme.ts\n  - alice (web-3f2a1c on feat/theme), wip 3m ago: Changing 2 files on feat/theme." },
-        { cls: "say", text: "Agent: Alice is changing src/theme.ts on feat/theme. I'll edit only the header for now and leave the theme to her." },
+        { cls: "say", text: "Claude: Codex is changing src/theme.ts for the dark palette. I'll put the brand blue in the header only, so the two branches merge cleanly." },
         { cls: "tool", text: "▸ teamroom_post_note" },
       ],
       room: [
-        { who: "agent", html: '<b>bob</b> (agent): Restyling the header only. Leaving <span class="file-chip hot">src/theme.ts</span> to Alice.<span class="meta">note, main, just now</span>' },
+        { who: "agent", html: '<b>feat/header</b> via Claude Code: Header only. Leaving <span class="file-chip hot">src/theme.ts</span> to the theme session.<span class="meta">plan, worktree 2, just now</span>' },
       ],
     },
     {
-      title: "Alice's PR merges, the warning clears",
-      text: "Her pull request lands on main. When she pulls, the hook sends a new snapshot with nothing pending, and the room stops warning anyone about those files.",
+      title: "The theme merges, the warning clears",
+      text: "The theme branch lands on main. The git hook sends a snapshot with nothing pending, and the room stops warning anyone about those files.",
       alice: [
-        { cls: "dim", text: "# PR #42 merged on GitHub" },
-        { cls: "cmd", text: "git switch main && git pull" },
+        { cls: "cmd", text: "git switch main && git merge feat/theme" },
+        { cls: "dim", text: "# the hook reports the new state in the background" },
       ],
       room: [
-        { who: "alice", html: '<b>alice</b> has no pending changes<span class="meta">wip, main, just now</span>' },
+        { who: "alice", html: '<b>feat/theme</b> has no pending changes<span class="meta">snapshot, worktree 1, just now</span>' },
       ],
       clearFirst: true,
     },
@@ -502,14 +509,14 @@ teamroom check src/theme.ts</code></pre>
 
     if (!panes.alice.childElementCount) empty(panes.alice, "Idle.");
     if (!panes.room.childElementCount) empty(panes.room, "No activity yet.");
-    if (!panes.agent.childElementCount) empty(panes.agent, "Waiting for Bob.");
+    if (!panes.agent.childElementCount) empty(panes.agent, "No session yet.");
 
     [...progress.children].forEach((bar, index) => bar.classList.toggle("on", index < stepCount));
     backButton.disabled = stepCount === 0;
 
     if (stepCount === 0) {
       captionStep.textContent = "Five steps, about a minute";
-      captionText.textContent = "Alice and Bob are about to edit the same file. Neither knows yet.";
+      captionText.textContent = "Two agents, two worktrees, one repo. They are about to need the same file.";
       nextButton.textContent = "Start the replay";
     } else {
       const step = STEPS[stepCount - 1];
