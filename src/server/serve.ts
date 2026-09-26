@@ -82,7 +82,46 @@ export function clientFromForwardedFor(header: string | undefined): string | und
   return entries.at(-1);
 }
 
-export function startServer(options: ServeOptions): ServerType {
+const EXIT_LISTEN_FAILED = 1;
+const PRIVILEGED_PORT_LIMIT = 1024;
+
+/**
+ * Turns the errors people actually hit when starting a server into one line
+ * that says what to do. Returns undefined for anything unexpected, which is
+ * then reported as is.
+ */
+export function describeListenError(error: unknown, options: Pick<ServeOptions, "host" | "port">): string | undefined {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const address = `${options.host}:${options.port}`;
+  if (code === "EADDRINUSE") {
+    return `Port ${options.port} is already in use on ${options.host}. Another teamroom server may be running: check with \`curl http://${address}/health\`, or start this one with --port ${options.port + 1}.`;
+  }
+  if (code === "EACCES") {
+    return options.port < PRIVILEGED_PORT_LIMIT
+      ? `Port ${options.port} needs administrator rights. Use a port of ${PRIVILEGED_PORT_LIMIT} or higher, such as --port 8787, and put a reverse proxy in front for 80 or 443.`
+      : `Not allowed to listen on ${address}. Check that nothing blocks this port, or try another one with --port.`;
+  }
+  if (code === "EADDRNOTAVAIL") {
+    return `${options.host} is not an address of this machine. Use --host 127.0.0.1 for local use or --host 0.0.0.0 to accept connections from other machines.`;
+  }
+  return undefined;
+}
+
+export type ListenErrorHandler = (error: Error) => void;
+
+/** Prints the problem without a stack trace and exits, since a server that cannot listen is useless. */
+function exitOnListenError(options: ServeOptions): ListenErrorHandler {
+  return (error) => {
+    const explained = describeListenError(error, options);
+    process.stderr.write(`teamroom: ${explained ?? `could not start the server: ${error.message}`}\n`);
+    process.exit(EXIT_LISTEN_FAILED);
+  };
+}
+
+export function startServer(
+  options: ServeOptions,
+  onListenError: ListenErrorHandler = exitOnListenError(options)
+): ServerType {
   const getClientAddress = (context: Context): string => {
     if (options.trustProxy) {
       const forwarded = clientFromForwardedFor(context.req.header("x-forwarded-for"));
@@ -104,6 +143,8 @@ export function startServer(options: ServeOptions): ServerType {
       roomCreation: options.createKey ? "requires create key" : "open",
     });
   });
+
+  server.once("error", onListenError);
 
   const shutdown = (): void => {
     server.close(() => process.exit(0));
