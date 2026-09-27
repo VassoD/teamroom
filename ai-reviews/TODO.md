@@ -32,7 +32,9 @@ Must-haves to be clearly better:
 ## 2. Less noise
 
 - [ ] Shorten the default overlap window from 72 hours (try 24h or less) in `src/core/overlap.ts`
-- [ ] Drop sessions whose worktree no longer exists (check `git worktree list` in local mode)
+- [x] Drop sessions whose worktree no longer exists (check `git worktree list` in local mode)
+- [x] Stop reporting files of a squash-merged branch (compare against the default branch, not only the merge-base)
+- [x] Keep only each session's latest snapshot, so snapshot churn does not push notes out of the 1000-entry log
 - [ ] Expire sessions with no activity for N hours, even without a new snapshot
 - [ ] Consider a built-in default ignore list for common hub/generated files beyond lockfiles
 
@@ -46,7 +48,8 @@ Must-haves to be clearly better:
 ## 4. Plans and intent (main differentiator)
 
 - [ ] Make notes more visible: surface other sessions' plans at session start and in `teamroom watch`
-- [ ] Let notes expire or be closed explicitly (`teamroom note --done`)
+- [x] Let notes expire: a plan ends once its session had changes and now has none
+- [ ] Let notes be closed explicitly (`teamroom note --done`)
 - [ ] Explore symbol-level plans ("renaming User to Account" matched against files that reference `User`)
 - [ ] Help split tasks up front: a command that shows which planned files overlap before agents start
 

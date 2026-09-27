@@ -6,6 +6,7 @@ import type { Activity, FileOverlap, Room, RoomView } from "../core/types.js";
 import { FileRoomStore } from "../store/file-store.js";
 import { RoomAlreadyExistsError, RoomNotFoundError } from "../store/store.js";
 import type { ApiClient } from "./api-client.js";
+import { DERIVED_SESSION_PATTERN } from "./git.js";
 
 /**
  * - `local`: every checkout of this repo on this machine, through a file in the git common dir. No server.
@@ -68,7 +69,9 @@ export class LocalBackend implements RoomBackend {
   constructor(
     gitCommonDir: string,
     private readonly member: string,
-    private readonly roomName: string
+    private readonly roomName: string,
+    /** Sessions whose checkout still exists, or undefined when that cannot be told. */
+    private readonly liveSessions: () => Promise<Set<string> | undefined> = async () => undefined
   ) {
     this.store = new FileRoomStore(localStoreDir(gitCommonDir));
   }
@@ -92,10 +95,10 @@ export class LocalBackend implements RoomBackend {
 
   async findOverlaps(query: OverlapQuery): Promise<FileOverlap[]> {
     const parsed = overlapRequestSchema.parse(query);
-    const room = await this.store.get(LOCAL_ROOM_ID);
+    const [room, live] = await Promise.all([this.store.get(LOCAL_ROOM_ID), this.liveSessions()]);
     if (!room) return [];
     return findOverlaps({
-      activity: room.activity,
+      activity: live ? room.activity.filter((entry) => isFromLiveCheckout(entry, live)) : room.activity,
       files: parsed.files,
       member: this.member,
       session: parsed.session,
@@ -121,6 +124,16 @@ export class LocalBackend implements RoomBackend {
     }
     return this.store.update(LOCAL_ROOM_ID, change);
   }
+}
+
+/**
+ * A removed worktree never sends the empty snapshot that would clear its
+ * files, so its last report is dropped instead. Sessions named by hand cannot
+ * be matched to a checkout and are always kept.
+ */
+function isFromLiveCheckout(entry: Activity, live: Set<string>): boolean {
+  if (!entry.session || !DERIVED_SESSION_PATTERN.test(entry.session)) return true;
+  return live.has(entry.session);
 }
 
 /** A local room has no invites: whoever writes from this machine is a member. */

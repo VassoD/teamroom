@@ -15,6 +15,76 @@ function hoursAgo(hours: number): string {
 }
 
 describe("findOverlaps", () => {
+  it("should forget a plan once its session had changes and now has none", () => {
+    const activity = [
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "note",
+        text: "renaming User",
+        files: ["src/user.ts"],
+        createdAt: hoursAgo(5),
+      }),
+      entry({ member: "bo", session: "s1", files: ["src/user.ts"], createdAt: hoursAgo(4) }),
+      entry({ member: "bo", session: "s1", files: [], createdAt: hoursAgo(1) }),
+    ];
+
+    expect(findOverlaps({ activity, files: ["src/user.ts"], member: "ada", now: NOW })).toEqual([]);
+  });
+
+  it("should keep a plan whose session has not changed anything yet", () => {
+    const activity = [
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "note",
+        text: "renaming User",
+        files: ["src/user.ts"],
+        createdAt: hoursAgo(5),
+      }),
+      entry({ member: "bo", session: "s1", files: [], createdAt: hoursAgo(1) }),
+    ];
+
+    const overlaps = findOverlaps({ activity, files: ["src/user.ts"], member: "ada", now: NOW });
+
+    expect(overlaps[0]?.touchedBy).toEqual([expect.objectContaining({ kind: "note", text: "renaming User" })]);
+  });
+
+  it("should keep a plan while its session still has changes", () => {
+    const activity = [
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "note",
+        text: "renaming User",
+        files: ["src/user.ts"],
+        createdAt: hoursAgo(5),
+      }),
+      entry({ member: "bo", session: "s1", files: ["src/db.ts"], createdAt: hoursAgo(1) }),
+    ];
+
+    const overlaps = findOverlaps({ activity, files: ["src/user.ts"], member: "ada", now: NOW });
+
+    expect(overlaps[0]?.touchedBy).toEqual([expect.objectContaining({ kind: "note", text: "renaming User" })]);
+  });
+
+  it("should keep a plan posted after the session's work was done", () => {
+    const activity = [
+      entry({ member: "bo", session: "s1", files: ["src/auth.ts"], createdAt: hoursAgo(6) }),
+      entry({ member: "bo", session: "s1", files: [], createdAt: hoursAgo(5) }),
+      entry({
+        member: "bo",
+        session: "s1",
+        kind: "note",
+        text: "renaming User",
+        files: ["src/user.ts"],
+        createdAt: hoursAgo(4),
+      }),
+    ];
+
+    expect(findOverlaps({ activity, files: ["src/user.ts"], member: "ada", now: NOW })).toHaveLength(1);
+  });
+
   it("should report other members who touched a requested file", () => {
     const activity = [entry({ member: "bo", files: ["src/auth.ts"], createdAt: hoursAgo(1) })];
 

@@ -35,6 +35,9 @@ Server settings are in [hosting.md](hosting.md).
 
 ## Limits
 
-- The room keeps the latest 1000 entries. Overlap looks back 72 hours by default (`--since-hours`, up to 90 days).
+- The room keeps the latest 1000 entries, and only each session's latest snapshot. Overlap looks back 72 hours by default (`--since-hours`, up to 90 days).
+- A plan posted with `teamroom note` stops counting once its session has had changes and then has none left, for example after a merge.
+- A changed file counts only while it still differs from the default branch, so a squash-merged branch stops warning once main has its changes.
+- In local mode, a worktree removed with `git worktree remove` (or whose directory was deleted) stops warning right away.
 - A snapshot holds up to 200 files. Larger change sets are truncated and the CLI says so.
 - On a server, rate limits are kept in memory per process, and rooms are stored as one JSON file each. That is fine for teams, not for thousands of active rooms.

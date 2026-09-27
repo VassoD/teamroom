@@ -199,6 +199,23 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
 
     expect((await worktreeA.backend.getRoom(1000)).room.activity.length).toBe(before + 20);
   });
+
+  it("should stop warning about a worktree once it is removed", async () => {
+    const removedRoot = path.join(tempDir, "c");
+    await git(path.join(tempDir, "repo"), "worktree", "add", "--quiet", "-b", "feature-c", removedRoot);
+    const removed = await openWorkspace(removedRoot, { env: ENV });
+    await fs.writeFile(path.join(removedRoot, "src", "billing.ts"), "export const billing = 1;\n");
+    await reportWork(removed, { source: "hook" });
+    const sessionsInFile = async (): Promise<Array<string | undefined>> =>
+      (await checkOverlap(worktreeB, { files: ["src/billing.ts"] })).overlaps.flatMap((overlap) =>
+        overlap.touchedBy.map((touch) => touch.session)
+      );
+    expect(await sessionsInFile()).toEqual([removed.session]);
+
+    await git(path.join(tempDir, "repo"), "worktree", "remove", "--force", removedRoot);
+
+    expect(await sessionsInFile()).toEqual([]);
+  });
 });
 
 describe("working state", () => {
@@ -224,5 +241,25 @@ describe("working state", () => {
     const state = await new Git(tempDir).workingState();
 
     expect(state.files).toEqual(["new.ts", "old.ts"]);
+  });
+
+  it("should stop listing a branch's files once it is squash-merged into main", async () => {
+    const repo = path.join(tempDir, "squash");
+    await fs.mkdir(repo);
+    await git(repo, "init", "--quiet", "-b", "main");
+    await fs.writeFile(path.join(repo, "auth.ts"), "export const auth = 1;\n");
+    await git(repo, "add", ".");
+    await git(repo, "commit", "--quiet", "-m", "initial");
+    await git(repo, "checkout", "--quiet", "-b", "feature");
+    await fs.writeFile(path.join(repo, "auth.ts"), "export const auth = 2;\n");
+    await git(repo, "commit", "--quiet", "-am", "change auth");
+    expect((await new Git(repo).workingState()).files).toEqual(["auth.ts"]);
+
+    await git(repo, "checkout", "--quiet", "main");
+    await git(repo, "merge", "--quiet", "--squash", "feature");
+    await git(repo, "commit", "--quiet", "-m", "squash feature");
+    await git(repo, "checkout", "--quiet", "feature");
+
+    expect((await new Git(repo).workingState()).files).toEqual([]);
   });
 });
