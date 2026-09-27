@@ -4,14 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { AgentHookEvent } from "../src/client/agent-events.js";
+import { handleAgentHook } from "../src/client/agent-hooks.js";
 import { LOCAL_ROOM_ID, localStoreDir } from "../src/client/backend.js";
-import { handleClaudeHook } from "../src/client/claude-events.js";
+import { CLAUDE_AGENT_ID, claudeHooks } from "../src/client/claude-hook.js";
 import { Git } from "../src/client/git.js";
 import { checkOverlap, openWorkspace, postNote, reportWork, type Workspace } from "../src/client/workspace.js";
 import { buildDashboard } from "../src/dashboard/model.js";
 import { AutoReporter } from "../src/mcp/auto-report.js";
 
 const execFileAsync = promisify(execFile);
+
+async function handleClaudeHook(event: Omit<AgentHookEvent, "agent">, workspace: Workspace): Promise<string> {
+  return handleAgentHook(claudeHooks, { ...event, agent: CLAUDE_AGENT_ID }, workspace);
+}
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const { stdout } = await execFileAsync(
@@ -92,7 +98,7 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
 
   it("should pause a Claude edit once per overlap, then let the retry through", async () => {
     const file = path.join(worktreeB.repoRoot, "src", "auth.ts");
-    const pre = { event: "PreToolUse", sessionId: "claude-1", tool: "Edit", file } as const;
+    const pre = { event: "PreToolUse", sessionId: "claude-1", file } as const;
 
     const first = JSON.parse(await handleClaudeHook(pre, worktreeB)) as PreToolUseOutput;
     const retry = await handleClaudeHook(pre, worktreeB);
@@ -107,7 +113,7 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
 
   it("should not pause again while the other session keeps editing, only when it posts a new plan", async () => {
     const file = path.join(worktreeB.repoRoot, "src", "auth.ts");
-    const pre = { event: "PreToolUse", sessionId: "claude-1", tool: "Edit", file } as const;
+    const pre = { event: "PreToolUse", sessionId: "claude-1", file } as const;
 
     await handleClaudeHook(
       { ...pre, file: path.join(worktreeA.repoRoot, "src", "auth.ts"), event: "PostToolUse" },
@@ -125,9 +131,7 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
   it("should let edits to files nobody else is changing through silently", async () => {
     const file = path.join(worktreeB.repoRoot, "src", "user.ts");
 
-    expect(await handleClaudeHook({ event: "PreToolUse", sessionId: "claude-1", tool: "Edit", file }, worktreeB)).toBe(
-      ""
-    );
+    expect(await handleClaudeHook({ event: "PreToolUse", sessionId: "claude-1", file }, worktreeB)).toBe("");
   });
 
   it("should brief a new Claude session on what the other worktree is changing", async () => {
@@ -145,7 +149,7 @@ describe("local mode: parallel agents in two worktrees, no server", () => {
 
   it("should share each Claude edit as it happens", async () => {
     const file = path.join(worktreeB.repoRoot, "src", "user.ts");
-    await handleClaudeHook({ event: "PostToolUse", sessionId: "claude-1", tool: "Edit", file }, worktreeB);
+    await handleClaudeHook({ event: "PostToolUse", sessionId: "claude-1", file }, worktreeB);
 
     const check = await checkOverlap(worktreeA, { files: ["src/user.ts"] });
 

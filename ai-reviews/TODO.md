@@ -18,6 +18,10 @@ Must-haves to be clearly better:
 - [ ] Plans before code that other agents actually see and respect (nobody else does this well)
 - [ ] Works across machines and teammates (Clash and orchestrators are local only)
 - [ ] Works with any agent, hooks or not (Claude Code, Codex, Cursor, Gemini CLI)
+  - [x] Claude Code and Gemini CLI: briefed at session start, edits paused before they happen
+  - [x] Agent hooks behind one adapter registry (`src/client/agent-hooks.ts`), so commands and docs name no agent
+  - [ ] Cursor: check in a real install whether its imported Claude hooks show the pause reason to the model; if not, add a native `.cursor/hooks.json` adapter (`preToolUse`, `agent_message`)
+  - [ ] Codex: only the MCP heads-up, which lands on its next teamroom tool call
 - [ ] Almost no false alarms, measured through dogfooding (section 6)
 - [ ] Setup stays one command
 
@@ -64,3 +68,8 @@ Must-haves to be clearly better:
 - [ ] Log every warning and mark whether it changed a decision (useful / noise)
 - [ ] Use the results to decide priorities: if file warnings are mostly noise, invest in sections 1 and 4
 - [ ] Clean up version mismatch: local `package.json` says 0.1.0, npm has 0.2.0
+
+## 7. Security
+
+- [x] Quote other sessions' notes, branch and member names before agents read them, so a note cannot pose as instructions
+- [ ] Detect `core.hooksPath` (husky and similar) in `teamroom doctor`: git hooks land in files husky regenerates

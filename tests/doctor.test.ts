@@ -63,7 +63,7 @@ describe("teamroom doctor", () => {
     expect(statusOf(checks, "Local store")).toBe("ok");
     expect(statusOf(checks, "teamroom on PATH")).toBe("warn");
     expect(statusOf(checks, "Git hooks")).toBe("warn");
-    expect(statusOf(checks, "Claude Code hooks")).toBe("warn");
+    expect(statusOf(checks, "Agent hooks")).toBe("warn");
     expect(statusOf(checks, "Agent setup")).toBe("warn");
     expect(statusOf(checks, "Agent instructions")).toBe("warn");
     expect(formatDoctor(checks)).toContain("fix: teamroom init");

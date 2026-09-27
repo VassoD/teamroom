@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { promisify } from "node:util";
+import { agentHookStatus } from "./agent-hooks.js";
 import { agentsMdHasTeamroom } from "./agents-md.js";
 import { ApiClient } from "./api-client.js";
 import { localStoreDir } from "./backend.js";
-import { CLAUDE_HOOK_EVENTS, claudeHooksInstalled } from "./claude-hook.js";
 import { loadConfig } from "./config.js";
 import { describeError } from "./errors.js";
 import { Git } from "./git.js";
@@ -75,19 +75,23 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
         }
   );
 
-  const claudeHooks = await claudeHooksInstalled(repoRoot);
-  const missingClaudeHooks = CLAUDE_HOOK_EVENTS.filter((event) => !claudeHooks.includes(event));
+  const { withHooks, mcpOnly } = await agentHookStatus(repoRoot).catch(() => ({ withHooks: [], mcpOnly: [] }));
+  const incomplete = withHooks.filter((status) => status.missingEvents.length > 0);
+  const mcpOnlyNote =
+    mcpOnly.length > 0
+      ? ` ${mcpOnly.join(", ")} ${mcpOnly.length === 1 ? "has" : "have"} no hooks yet and hear about overlap through MCP only.`
+      : "";
   checks.push(
-    missingClaudeHooks.length === 0
+    incomplete.length === 0
       ? {
-          name: "Claude Code hooks",
+          name: "Agent hooks",
           status: "ok",
-          detail: "Sessions are briefed and edits are checked before they happen.",
+          detail: `On for ${withHooks.map((status) => status.label).join(", ")}: sessions are briefed and edits are checked before they happen.${mcpOnlyNote}`,
         }
       : {
-          name: "Claude Code hooks",
+          name: "Agent hooks",
           status: "warn",
-          detail: `Missing: ${missingClaudeHooks.join(", ")}. Only matters if you use Claude Code: it then checks overlap only when it thinks to.`,
+          detail: `Missing for ${incomplete.map((status) => `${status.label} (${status.missingEvents.join(", ")})`).join(", ")}. Those agents then check overlap only when they think to.${mcpOnlyNote}`,
           fix: "teamroom init",
         }
   );
@@ -115,7 +119,7 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
       : {
           name: "Agent instructions",
           status: "warn",
-          detail: "Agents without hooks (Codex, Cursor, Gemini CLI, Vibe) will not know to check before editing.",
+          detail: "Agents without teamroom hooks will not know to check before editing.",
           fix: "teamroom init",
         }
   );

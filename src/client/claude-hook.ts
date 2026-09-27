@@ -1,5 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
+import type { AgentHookEvent, HookDecision } from "./agent-events.js";
+import type { AgentHookAdapter, AgentHookChangeResult } from "./agent-hooks.js";
 
 /**
  * Claude Code runs hooks at fixed points and writes a JSON payload to the
@@ -15,6 +18,7 @@ export const CLAUDE_HOOK_EVENTS = ["SessionStart", "PreToolUse", "PostToolUse"] 
 export type ClaudeHookEvent = (typeof CLAUDE_HOOK_EVENTS)[number];
 export const CLAUDE_SETTINGS_FILE = path.join(".claude", "settings.local.json");
 const CLAUDE_HOOK_TIMEOUT_SECONDS = 10;
+export const CLAUDE_AGENT_ID = "claude-code";
 const HOOK_MARKER = "teamroom claude-hook";
 
 const PATH_FALLBACK = `command -v teamroom >/dev/null 2>&1 && ${HOOK_MARKER}`;
@@ -59,11 +63,6 @@ interface ClaudeSettings {
  */
 export const CLAUDE_ALLOWED_TOOLS = ["mcp__teamroom", "Bash(teamroom check:*)", "Bash(teamroom note:*)"];
 
-/** Marks, in the shared git dir, that this repo wants Claude Code hooks, so new worktrees get them too. */
-const CLAUDE_WANTED_FILE = "claude-hooks-wanted";
-
-export type ClaudeHookChange = "installed" | "unchanged" | "removed" | "absent";
-
 function isTeamroomGroup(group: MatcherGroup): boolean {
   return group.hooks?.some((hook) => hook.command?.includes(HOOK_MARKER)) ?? false;
 }
@@ -103,7 +102,7 @@ function wantedGroup(event: ClaudeHookEvent, command: string): MatcherGroup {
 export async function installClaudeHooks(
   repoRoot: string,
   cli?: { node: string; script: string }
-): Promise<{ change: ClaudeHookChange; file: string }> {
+): Promise<AgentHookChangeResult> {
   const file = path.join(repoRoot, CLAUDE_SETTINGS_FILE);
   const settings = await readSettings(file);
   const command = claudeHookCommand(cli);
@@ -132,31 +131,12 @@ export async function installClaudeHooks(
   return { change: "installed", file };
 }
 
-export async function rememberClaudeHooksWanted(storeDir: string, wanted: boolean): Promise<void> {
-  const file = path.join(storeDir, CLAUDE_WANTED_FILE);
-  if (!wanted) {
-    await fs.rm(file, { force: true });
-    return;
-  }
-  await fs.mkdir(storeDir, { recursive: true });
-  await fs.writeFile(file, "", "utf8");
-}
-
-export async function claudeHooksWanted(storeDir: string): Promise<boolean> {
-  try {
-    await fs.access(path.join(storeDir, CLAUDE_WANTED_FILE));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function claudeHooksInstalled(repoRoot: string): Promise<ClaudeHookEvent[]> {
   const settings = await readSettings(path.join(repoRoot, CLAUDE_SETTINGS_FILE)).catch(() => ({}) as ClaudeSettings);
   return CLAUDE_HOOK_EVENTS.filter((event) => settings.hooks?.[event]?.some(isTeamroomGroup));
 }
 
-export async function uninstallClaudeHooks(repoRoot: string): Promise<{ change: ClaudeHookChange; file: string }> {
+export async function uninstallClaudeHooks(repoRoot: string): Promise<AgentHookChangeResult> {
   const file = path.join(repoRoot, CLAUDE_SETTINGS_FILE);
   const settings = await readSettings(file);
   const hooks: Record<string, MatcherGroup[] | undefined> = { ...settings.hooks };
@@ -187,3 +167,73 @@ function removeAllowedTools(settings: ClaudeSettings): void {
   if (Object.keys(permissions).length > 0) settings.permissions = permissions;
   else delete settings.permissions;
 }
+
+const payloadSchema = z.object({
+  // Older installs only registered PostToolUse, whose payloads are handled the same way.
+  hook_event_name: z.string().default("PostToolUse"),
+  session_id: z.string().optional(),
+  cwd: z.string().optional(),
+  tool_name: z.string().optional(),
+  tool_input: z
+    .object({
+      file_path: z.string().optional(),
+      notebook_path: z.string().optional(),
+    })
+    .loose()
+    .optional(),
+});
+
+/** Returns what teamroom cares about in a Claude Code hook payload, or null when it is none of its business. */
+export function parseClaudeHookPayload(rawPayload: string): AgentHookEvent | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(rawPayload);
+  } catch {
+    return null;
+  }
+  const parsed = payloadSchema.safeParse(json);
+  if (!parsed.success) return null;
+  const { hook_event_name: event, session_id: sessionId, cwd, tool_name: tool, tool_input: input } = parsed.data;
+
+  if (event === "SessionStart") return { event, sessionId, cwd, agent: CLAUDE_AGENT_ID };
+  if (event !== "PreToolUse" && event !== "PostToolUse") return null;
+  if (!tool || !(CLAUDE_EDIT_TOOLS as readonly string[]).includes(tool)) return null;
+  const file = input?.file_path ?? input?.notebook_path;
+  return file ? { event, sessionId, cwd, file, agent: CLAUDE_AGENT_ID } : null;
+}
+
+/** Claude Code reads `permissionDecision: "deny"` and shows the reason to the model, which can retry. */
+export function formatClaudeHookOutput(decision: HookDecision): string {
+  switch (decision.type) {
+    case "none":
+      return "";
+    case "context":
+      return JSON.stringify({
+        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: decision.text },
+      });
+    case "deny":
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: decision.reason,
+        },
+      });
+  }
+}
+
+export const claudeHooks: AgentHookAdapter = {
+  agent: "claude",
+  label: "Claude Code",
+  command: "claude-hook",
+  // Always, like its MCP config: the file is personal, so it costs nobody anything.
+  usedIn: async () => true,
+  install: installClaudeHooks,
+  uninstall: uninstallClaudeHooks,
+  missingEvents: async (repoRoot) => {
+    const installed = await claudeHooksInstalled(repoRoot);
+    return CLAUDE_HOOK_EVENTS.filter((event) => !installed.includes(event));
+  },
+  parse: parseClaudeHookPayload,
+  format: formatClaudeHookOutput,
+};

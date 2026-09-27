@@ -273,8 +273,8 @@
         </ul>
       </div>
       <div class="net hook">
-        <h3><i class="who alice" aria-hidden="true"></i>Claude Code hooks</h3>
-        <p class="verdict">Enforced by Claude Code.</p>
+        <h3><i class="who alice" aria-hidden="true"></i>Agent hooks</h3>
+        <p class="verdict">Enforced by the agent itself, where it supports hooks (Claude Code, Gemini CLI).</p>
         <ul>
           <li>A new session is briefed on what the other sessions are changing.</li>
           <li>An edit to a file someone else is in is paused once, with who and why. The retry goes through.</li>
@@ -374,7 +374,7 @@
       <li>
         <h3>Set up your repo, once</h3>
         <pre><code>teamroom init</code></pre>
-        <p>Adds git hooks, MCP config for the agents it finds, an <code>AGENTS.md</code> block and the Claude Code hooks. Commit what it wrote.</p>
+        <p>Adds git hooks, MCP config for the agents it finds, an <code>AGENTS.md</code> block and hooks for the agents that support them. Commit what it wrote.</p>
       </li>
       <li>
         <h3>Give each agent its own worktree</h3>

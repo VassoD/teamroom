@@ -83,7 +83,7 @@ Clean up from the main checkout with `git worktree remove --force ../try-a && gi
 ## How it works
 
 - **Sessions, not people.** Every checkout (worktree, clone, agent box) is its own session. Two agents of the same developer in two worktrees warn each other.
-- **It watches, it does not ask.** Git hooks, the MCP server, and Claude Code and Gemini CLI hooks share each checkout's changes on their own, so the room stays accurate even when an agent ignores its instructions. [docs/setup.md](docs/setup.md) lists every piece `init` installs.
+- **It watches, it does not ask.** Git hooks, the MCP server and agent hooks share each checkout's changes on their own, so the room stays accurate even when an agent ignores its instructions. [docs/setup.md](docs/setup.md) lists every piece `init` installs.
 - **Warnings clear themselves.** A session's newest snapshot replaces the old one, so once you merge, revert or switch branches, the warning goes away.
 - **Nothing blocks for good.** A paused Claude edit goes through on retry, and git is never blocked.
 
