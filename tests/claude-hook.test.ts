@@ -2,15 +2,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseClaudeHookPayload } from "../src/client/claude-events.js";
+import { agentHooksWanted, rememberAgentHooksWanted } from "../src/client/agent-hooks.js";
 import {
   CLAUDE_ALLOWED_TOOLS,
   CLAUDE_SETTINGS_FILE,
   claudeHookCommand,
   claudeHooksInstalled,
-  claudeHooksWanted,
   installClaudeHooks,
-  rememberClaudeHooksWanted,
+  parseClaudeHookPayload,
   uninstallClaudeHooks,
 } from "../src/client/claude-hook.js";
 
@@ -30,8 +29,8 @@ describe("parseClaudeHookPayload", () => {
       event: "PostToolUse",
       sessionId: "abc",
       cwd: "/repo",
-      tool: "Edit",
       file: "/repo/src/theme.ts",
+      agent: "claude-code",
     });
   });
 
@@ -47,6 +46,7 @@ describe("parseClaudeHookPayload", () => {
       event: "SessionStart",
       sessionId: "abc",
       cwd: "/repo",
+      agent: "claude-code",
     });
   });
 
@@ -147,13 +147,13 @@ describe("Claude Code hook install", () => {
 
   it("should remember across worktrees whether the repo wants Claude Code hooks", async () => {
     const storeDir = path.join(repo, ".git", "teamroom");
-    expect(await claudeHooksWanted(storeDir)).toBe(false);
+    expect(await agentHooksWanted(storeDir)).toBe(false);
 
-    await rememberClaudeHooksWanted(storeDir, true);
-    expect(await claudeHooksWanted(storeDir)).toBe(true);
+    await rememberAgentHooksWanted(storeDir, true);
+    expect(await agentHooksWanted(storeDir)).toBe(true);
 
-    await rememberClaudeHooksWanted(storeDir, false);
-    expect(await claudeHooksWanted(storeDir)).toBe(false);
+    await rememberAgentHooksWanted(storeDir, false);
+    expect(await agentHooksWanted(storeDir)).toBe(false);
   });
 
   it("should refuse to overwrite a settings file it cannot parse", async () => {

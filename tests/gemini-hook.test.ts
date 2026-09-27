@@ -4,10 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { handleAgentHook } from "../src/client/agent-hooks.js";
 import {
   GEMINI_HOOK_COMMAND,
   GEMINI_SETTINGS_FILE,
-  handleGeminiHook,
+  geminiHooks,
   installGeminiHooks,
   parseGeminiHookPayload,
   uninstallGeminiHooks,
@@ -179,8 +180,11 @@ describe("handleGeminiHook in two worktrees", () => {
       agent: "gemini-cli",
     } as const;
 
-    const first = JSON.parse(await handleGeminiHook(pre, worktreeB)) as { decision: string; reason: string };
-    const retry = await handleGeminiHook(pre, worktreeB);
+    const first = JSON.parse(await handleAgentHook(geminiHooks, pre, worktreeB)) as {
+      decision: string;
+      reason: string;
+    };
+    const retry = await handleAgentHook(geminiHooks, pre, worktreeB);
 
     expect(first.decision).toBe("deny");
     expect(first.reason).toContain("src/auth.ts");
@@ -190,14 +194,15 @@ describe("handleGeminiHook in two worktrees", () => {
 
   it("should brief a new session on what the other worktree is changing", async () => {
     const output = JSON.parse(
-      await handleGeminiHook({ event: "SessionStart", sessionId: "gem-2", agent: "gemini-cli" }, worktreeB)
+      await handleAgentHook(geminiHooks, { event: "SessionStart", sessionId: "gem-2", agent: "gemini-cli" }, worktreeB)
     ) as { hookSpecificOutput: { additionalContext: string } };
 
     expect(output.hookSpecificOutput.additionalContext).toContain("src/auth.ts");
   });
 
   it("should share each Gemini write as a Gemini CLI edit", async () => {
-    await handleGeminiHook(
+    await handleAgentHook(
+      geminiHooks,
       { event: "PostToolUse", file: path.join(worktreeB.repoRoot, "src", "billing.ts"), agent: "gemini-cli" },
       worktreeB
     );

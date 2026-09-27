@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { decideHook, type EditHookEvent, type HookOutput } from "./claude-events.js";
-import type { Workspace } from "./workspace.js";
+import type { AgentHookEvent, HookDecision } from "./agent-events.js";
+import type { AgentHookAdapter, AgentHookChangeResult } from "./agent-hooks.js";
+import type { AgentId } from "./mcp-config.js";
 
 /**
  * Gemini CLI runs command hooks with a JSON payload on stdin, like Claude
@@ -26,7 +27,7 @@ const GEMINI_HOOK_TIMEOUT_MS = 10_000;
 /** A teammate without teamroom installed runs a no-op, never an error. */
 export const GEMINI_HOOK_COMMAND = `command -v teamroom >/dev/null 2>&1 && ${HOOK_MARKER} || true`;
 
-const TEAMROOM_EVENT: Record<GeminiHookEvent, EditHookEvent["event"]> = {
+const TEAMROOM_EVENT: Record<GeminiHookEvent, AgentHookEvent["event"]> = {
   SessionStart: "SessionStart",
   BeforeTool: "PreToolUse",
   AfterTool: "PostToolUse",
@@ -40,10 +41,8 @@ const payloadSchema = z.object({
   tool_input: z.object({ file_path: z.string().optional() }).loose().optional(),
 });
 
-export type GeminiHookPayload = EditHookEvent & { cwd?: string };
-
 /** Returns what teamroom cares about in a Gemini CLI hook payload, or null when it is none of its business. */
-export function parseGeminiHookPayload(rawPayload: string): GeminiHookPayload | null {
+export function parseGeminiHookPayload(rawPayload: string): AgentHookEvent | null {
   let json: unknown;
   try {
     json = JSON.parse(rawPayload);
@@ -61,8 +60,7 @@ export function parseGeminiHookPayload(rawPayload: string): GeminiHookPayload | 
 }
 
 /** Gemini CLI reads `decision: "deny"` with a `reason` the model sees as the tool's error, and can retry after. */
-export async function handleGeminiHook(payload: GeminiHookPayload, workspace: Workspace): Promise<HookOutput> {
-  const decision = await decideHook(payload, workspace);
+export function formatGeminiHookOutput(decision: HookDecision): string {
   switch (decision.type) {
     case "none":
       return "";
@@ -91,8 +89,6 @@ interface GeminiSettings {
   hooks?: Record<string, MatcherGroup[] | undefined>;
   [key: string]: unknown;
 }
-
-export type GeminiHookChange = "installed" | "unchanged" | "removed" | "absent";
 
 function isTeamroomGroup(group: MatcherGroup): boolean {
   return group.hooks?.some((hook) => hook.command?.includes(HOOK_MARKER)) ?? false;
@@ -129,7 +125,7 @@ async function writeSettings(file: string, settings: GeminiSettings): Promise<vo
 }
 
 /** Adds the teamroom hooks to `.gemini/settings.json`, keeping every other setting and hook. */
-export async function installGeminiHooks(repoRoot: string): Promise<{ change: GeminiHookChange; file: string }> {
+export async function installGeminiHooks(repoRoot: string): Promise<AgentHookChangeResult> {
   const file = path.join(repoRoot, GEMINI_SETTINGS_FILE);
   const settings = await readSettings(file);
   const hooks = { ...settings.hooks };
@@ -149,7 +145,7 @@ export async function installGeminiHooks(repoRoot: string): Promise<{ change: Ge
   return { change: "installed", file };
 }
 
-export async function uninstallGeminiHooks(repoRoot: string): Promise<{ change: GeminiHookChange; file: string }> {
+export async function uninstallGeminiHooks(repoRoot: string): Promise<AgentHookChangeResult> {
   const file = path.join(repoRoot, GEMINI_SETTINGS_FILE);
   const settings = await readSettings(file);
   const hooks: Record<string, MatcherGroup[] | undefined> = { ...settings.hooks };
@@ -168,3 +164,35 @@ export async function uninstallGeminiHooks(repoRoot: string): Promise<{ change: 
   await writeSettings(file, Object.keys(hooks).length > 0 ? { ...rest, hooks } : rest);
   return { change: "removed", file };
 }
+
+export async function geminiHooksInstalled(repoRoot: string): Promise<GeminiHookEvent[]> {
+  const settings = await readSettings(path.join(repoRoot, GEMINI_SETTINGS_FILE)).catch(() => ({}) as GeminiSettings);
+  return GEMINI_HOOK_EVENTS.filter((event) => settings.hooks?.[event]?.some(isTeamroomGroup));
+}
+
+/** Same rule as its MCP config: the file is committed, so only repos that already use Gemini CLI get it. */
+async function usesGemini(repoRoot: string, forced: readonly AgentId[]): Promise<boolean> {
+  if (forced.includes("gemini")) return true;
+  try {
+    await fs.access(path.join(repoRoot, path.dirname(GEMINI_SETTINGS_FILE)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const geminiHooks: AgentHookAdapter = {
+  agent: "gemini",
+  label: "Gemini CLI",
+  command: "gemini-hook",
+  usedIn: usesGemini,
+  // Committed, so it never names this machine's copy of teamroom.
+  install: (repoRoot) => installGeminiHooks(repoRoot),
+  uninstall: uninstallGeminiHooks,
+  missingEvents: async (repoRoot) => {
+    const installed = await geminiHooksInstalled(repoRoot);
+    return GEMINI_HOOK_EVENTS.filter((event) => !installed.includes(event));
+  },
+  parse: parseGeminiHookPayload,
+  format: formatGeminiHookOutput,
+};

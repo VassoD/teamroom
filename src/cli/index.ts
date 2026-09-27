@@ -2,28 +2,21 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import {
+  adapterForCommand,
+  adoptAgentHooks,
+  agentHooksWanted,
+  handleAgentHook,
+  installAgentHooks,
+  rememberAgentHooksWanted,
+  uninstallAgentHooks,
+} from "../client/agent-hooks.js";
 import { installAgentsMd } from "../client/agents-md.js";
 import { ApiClient } from "../client/api-client.js";
 import { localStoreDir } from "../client/backend.js";
-import { handleClaudeHook, parseClaudeHookPayload } from "../client/claude-events.js";
-import {
-  CLAUDE_HOOK_EVENTS,
-  claudeHooksInstalled,
-  claudeHooksWanted,
-  installClaudeHooks,
-  rememberClaudeHooksWanted,
-  uninstallClaudeHooks,
-} from "../client/claude-hook.js";
 import { ENV, removeConfig, saveConfig } from "../client/config.js";
 import { formatDoctor, runDoctor } from "../client/doctor.js";
 import { describeError, UsageError } from "../client/errors.js";
-import {
-  GEMINI_SETTINGS_FILE,
-  handleGeminiHook,
-  installGeminiHooks,
-  parseGeminiHookPayload,
-  uninstallGeminiHooks,
-} from "../client/gemini-hook.js";
 import { Git } from "../client/git.js";
 import { type CliLocation, installHooks, uninstallHooks } from "../client/hooks.js";
 import { formatInviteLink, normalizeServerUrl, parseInviteLink } from "../client/invite-link.js";
@@ -65,9 +58,9 @@ const EXIT_USAGE = 2;
 const EXIT_OVERLAP_FOUND = 3;
 const DEFAULT_STATUS_LIMIT = 20;
 const ACTIVITY_SOURCES = ["human", "hook", "agent"] as const;
-const CLAUDE_HOOK_STDIN_TIMEOUT_MS = 2_000;
-/** Claude Code waits for these hooks, so a slow or unreachable server must give up fast. */
-const CLAUDE_HOOK_NETWORK_TIMEOUT_MS = 1_500;
+const AGENT_HOOK_STDIN_TIMEOUT_MS = 2_000;
+/** Agents wait for their hooks, so a slow or unreachable server must give up fast. */
+const AGENT_HOOK_NETWORK_TIMEOUT_MS = 1_500;
 
 const HELP = `teamroom: keep parallel coding agents out of each other's files.
 
@@ -78,7 +71,7 @@ with any MCP agent: Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe and oth
 Start (one command, no server, no account)
   teamroom init [--agents codex,cursor,gemini]
                                     Git hooks, MCP config for the agents this repo uses,
-                                    AGENTS.md instructions, and Claude Code and Gemini CLI hooks
+                                    AGENTS.md instructions, and agent hooks
   teamroom doctor                   Check the setup and say how to fix what is missing
 
 Daily use
@@ -99,7 +92,7 @@ Share with teammates (optional, needs a server)
   teamroom token rotate             Replace your token, for example after a leak
 
 Maintenance
-  teamroom hooks install | uninstall   Git hooks, and Claude Code and Gemini CLI hooks only
+  teamroom hooks install | uninstall   Git hooks and agent hooks only
 
 Without a shared room, teamroom runs in local mode: the worktrees of this repo on
 this machine see each other through a file in the git directory. Names default to
@@ -113,7 +106,8 @@ type Command = (args: string[]) => Promise<number>;
 
 interface SetupSteps {
   gitHooks: boolean;
-  claudeHooks: boolean;
+  /** Hooks inside the agents that support them, so an edit can be paused before it happens. */
+  agentHooks: boolean;
   mcp: boolean;
   agentsMd: boolean;
   /** Agents to configure even when the repo has no folder for them yet. */
@@ -129,6 +123,8 @@ const commands: Record<string, Command> = {
       options: {
         agents: { type: "string" },
         "skip-hooks": { type: "boolean", default: false },
+        "skip-agent-hooks": { type: "boolean", default: false },
+        // The flag's first name, from when Claude Code was the only agent with hooks.
         "skip-claude": { type: "boolean", default: false },
         "skip-mcp": { type: "boolean", default: false },
         "skip-agents-md": { type: "boolean", default: false },
@@ -137,7 +133,7 @@ const commands: Record<string, Command> = {
     const workspace = await openWorkspace(process.cwd());
     await setUp(workspace.git, workspace.repoRoot, {
       gitHooks: !values["skip-hooks"],
-      claudeHooks: !values["skip-claude"],
+      agentHooks: !values["skip-agent-hooks"] && !values["skip-claude"],
       mcp: !values["skip-mcp"],
       agentsMd: !values["skip-agents-md"],
       agents: parseAgents(values.agents),
@@ -211,7 +207,7 @@ const commands: Record<string, Command> = {
     print(`Created room "${created.room.name}". You are ${created.me}, the owner.`);
     await setUp(git, repoRoot, {
       gitHooks: !values["skip-hooks"],
-      claudeHooks: !values["skip-agents"],
+      agentHooks: !values["skip-agents"],
       mcp: !values["skip-agents"],
       agentsMd: !values["skip-agents"],
     });
@@ -260,7 +256,7 @@ const commands: Record<string, Command> = {
     const hasMcp = await mcpConfigHasTeamroom(repoRoot).catch(() => false);
     await setUp(git, repoRoot, {
       gitHooks: !values["skip-hooks"],
-      claudeHooks: !values["skip-hooks"],
+      agentHooks: !values["skip-hooks"],
       mcp: !hasMcp,
       agentsMd: false,
     });
@@ -298,50 +294,12 @@ const commands: Record<string, Command> = {
     const cli = await currentCli();
     const changes = action === "install" ? await installHooks(hooksDir, cli) : await uninstallHooks(hooksDir);
     for (const [hook, change] of Object.entries(changes)) print(`git ${hook}: ${change}`);
-    const claude =
-      action === "install" ? await installClaudeHooks(repoRoot, cli) : await uninstallClaudeHooks(repoRoot);
-    await rememberClaudeHooksWanted(localStoreDir(commonDir), action === "install");
-    print(`Claude Code hooks: ${claude.change} (${path.relative(repoRoot, claude.file)})`);
-    if (action === "install" && claude.change === "installed") {
-      print("Restart Claude Code sessions in this repo to pick them up.");
-    }
-    if (action === "uninstall" || (await usesGemini(repoRoot, []))) {
-      const gemini = action === "install" ? await installGeminiHooks(repoRoot) : await uninstallGeminiHooks(repoRoot);
-      print(`Gemini CLI hooks: ${gemini.change} (${path.relative(repoRoot, gemini.file)})`);
-    }
-    return EXIT_OK;
-  },
-
-  // Called by Claude Code at session start and around each file edit. Always exits 0: it must never get in Claude's way.
-  "claude-hook": async () => {
-    try {
-      const payload = parseClaudeHookPayload(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
-      if (!payload) return EXIT_OK;
-      const workspace = await openWorkspace(payload.cwd ?? process.cwd(), {
-        timeoutMs: CLAUDE_HOOK_NETWORK_TIMEOUT_MS,
-        maxAttempts: 1,
-      });
-      const output = await handleClaudeHook(payload, workspace);
-      if (output) print(output);
-    } catch {
-      // Not a git repo, server down, or a file outside the repo: nothing to say.
-    }
-    return EXIT_OK;
-  },
-
-  // Called by Gemini CLI at session start and around each file write. Always exits 0, like `claude-hook`.
-  "gemini-hook": async () => {
-    try {
-      const payload = parseGeminiHookPayload(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
-      if (!payload) return EXIT_OK;
-      const workspace = await openWorkspace(payload.cwd ?? process.cwd(), {
-        timeoutMs: CLAUDE_HOOK_NETWORK_TIMEOUT_MS,
-        maxAttempts: 1,
-      });
-      const output = await handleGeminiHook(payload, workspace);
-      if (output) print(output);
-    } catch {
-      // Not a git repo, server down, or a file outside the repo: nothing to say.
+    const agentChanges =
+      action === "install" ? await installAgentHooks(repoRoot, { cli }) : await uninstallAgentHooks(repoRoot);
+    await rememberAgentHooksWanted(localStoreDir(commonDir), action === "install");
+    for (const { label, change, file } of agentChanges) print(`${label} hooks: ${change} (${relativeTo(file)})`);
+    if (agentChanges.some(({ change }) => change === "installed")) {
+      print("Restart agent sessions in this repo to pick up new hooks.");
     }
     return EXIT_OK;
   },
@@ -377,7 +335,7 @@ const commands: Record<string, Command> = {
     const source = ACTIVITY_SOURCES.find((candidate) => candidate === values.source);
     if (!source) throw new UsageError(`--source must be one of ${ACTIVITY_SOURCES.join(", ")}.`);
     const workspace = await openWorkspace(process.cwd());
-    if (source === "hook") await adoptClaudeHooks(workspace);
+    if (source === "hook") await adoptHooks(workspace);
     const { activity, omittedFiles } = await reportWork(workspace, { source, note: values.note });
     if (!values.quiet) {
       const omitted = omittedFiles > 0 ? `, ${omittedFiles} left out (over the limit)` : "";
@@ -472,6 +430,28 @@ const commands: Record<string, Command> = {
   },
 };
 
+/**
+ * The hidden commands agents' hooks run at session start and around each file
+ * edit, one per agent. They always exit 0: teamroom must never get in an agent's way.
+ */
+async function runAgentHook(command: string): Promise<number> {
+  const adapter = adapterForCommand(command);
+  if (!adapter) return EXIT_OK;
+  try {
+    const event = adapter.parse(await readStdin(AGENT_HOOK_STDIN_TIMEOUT_MS));
+    if (!event) return EXIT_OK;
+    const workspace = await openWorkspace(event.cwd ?? process.cwd(), {
+      timeoutMs: AGENT_HOOK_NETWORK_TIMEOUT_MS,
+      maxAttempts: 1,
+    });
+    const output = await handleAgentHook(adapter, event, workspace);
+    if (output) print(output);
+  } catch {
+    // Not a git repo, server down, or a file outside the repo: nothing to say.
+  }
+  return EXIT_OK;
+}
+
 async function setUp(git: Git, repoRoot: string, steps: SetupSteps): Promise<void> {
   const cli = await currentCli();
   if (steps.gitHooks) {
@@ -485,44 +465,29 @@ async function setUp(git: Git, repoRoot: string, steps: SetupSteps): Promise<voi
       `AGENTS.md (${change}): tells every agent to announce its plan and check before editing. ${relativeTo(file)}`
     );
   }
-  if (steps.claudeHooks) {
-    const { change } = await installClaudeHooks(repoRoot, cli);
-    await rememberClaudeHooksWanted(localStoreDir(await git.commonDir()), true);
+  if (steps.agentHooks) {
+    const results = await installAgentHooks(repoRoot, { cli, forced: steps.agents ?? [] });
+    await rememberAgentHooksWanted(localStoreDir(await git.commonDir()), true);
     print(
-      `Claude Code hooks (${change}): sessions are briefed on the others, and an edit to a file another session is changing is paused once with the details.`
+      "Agent hooks: each session is briefed on the others, and an edit to a file another session is changing is paused once with the details."
     );
-    if (change === "installed") print("  Restart Claude Code sessions in this repo to pick them up.");
-    if (await usesGemini(repoRoot, steps.agents ?? [])) {
-      const gemini = await installGeminiHooks(repoRoot);
-      print(
-        `Gemini CLI hooks (${gemini.change}): the same briefing and pause, in ${relativeTo(gemini.file)}. Commit it with the MCP config.`
-      );
+    for (const { label, change, file } of results) print(`  ${label} (${change}): ${relativeTo(file)}`);
+    if (results.some(({ change }) => change === "installed")) {
+      print("  Restart agent sessions in this repo to pick them up. Commit the files that are not personal.");
     }
   }
 }
 
-/** Same rule as the MCP config: only when the repo already has a `.gemini` folder, or init was told to. */
-async function usesGemini(repoRoot: string, forced: AgentId[]): Promise<boolean> {
-  if (forced.includes("gemini")) return true;
-  try {
-    await fs.access(path.join(repoRoot, path.dirname(GEMINI_SETTINGS_FILE)));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * `.claude/settings.local.json` is not committed, so a worktree created after
- * `init` would start without the Claude Code hooks. `git worktree add` runs
- * the post-checkout hook in the new worktree, which lands here and installs
- * them, as long as the repo asked for them once. Never fails the report.
+ * Some agents keep their hooks in files that are not committed, so a worktree
+ * created after `init` would start without them. `git worktree add` runs the
+ * post-checkout hook in the new worktree, which lands here and installs them,
+ * as long as the repo asked for agent hooks once. Never fails the report.
  */
-async function adoptClaudeHooks(workspace: Workspace): Promise<void> {
+async function adoptHooks(workspace: Workspace): Promise<void> {
   try {
-    if (!(await claudeHooksWanted(localStoreDir(workspace.commonDir)))) return;
-    if ((await claudeHooksInstalled(workspace.repoRoot)).length === CLAUDE_HOOK_EVENTS.length) return;
-    await installClaudeHooks(workspace.repoRoot, await currentCli());
+    if (!(await agentHooksWanted(localStoreDir(workspace.commonDir)))) return;
+    await adoptAgentHooks(workspace.repoRoot, await currentCli());
   } catch {
     // An unreadable settings file stays as it is; `teamroom doctor` points at it.
   }
@@ -613,7 +578,7 @@ async function main(argv: string[]): Promise<number> {
     print(HELP);
     return name ? EXIT_OK : EXIT_USAGE;
   }
-  const command = commands[name];
+  const command = commands[name] ?? (adapterForCommand(name) ? () => runAgentHook(name) : undefined);
   if (!command) {
     process.stderr.write(`Unknown command "${name}". Run \`teamroom --help\`.\n`);
     return EXIT_USAGE;

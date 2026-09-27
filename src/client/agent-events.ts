@@ -5,7 +5,6 @@ import { z } from "zod";
 import { overlapSignature } from "../core/overlap.js";
 import { buildDashboard, type SessionSummary } from "../dashboard/model.js";
 import { localStoreDir } from "./backend.js";
-import { CLAUDE_EDIT_TOOLS } from "./claude-hook.js";
 import {
   checkOverlap,
   formatAge,
@@ -19,8 +18,6 @@ import {
   type Workspace,
 } from "./workspace.js";
 
-export const CLAUDE_AGENT_ID = "claude-code";
-
 const HOUR_MS = 60 * 60 * 1000;
 /** Sessions quieter than this are old news, not something a new session needs to hear about. */
 const BRIEFING_WINDOW_MS = 24 * HOUR_MS;
@@ -31,81 +28,24 @@ const WARNING_STATE_DIR = "claude-warnings";
 /** Warning state is per agent session. Files older than this belong to sessions long gone. */
 const WARNING_STATE_MAX_AGE_MS = 7 * 24 * HOUR_MS;
 
-const payloadSchema = z.object({
-  // Older installs only registered PostToolUse, whose payloads are handled the same way.
-  hook_event_name: z.string().default("PostToolUse"),
-  session_id: z.string().optional(),
-  cwd: z.string().optional(),
-  tool_name: z.string().optional(),
-  tool_input: z
-    .object({
-      file_path: z.string().optional(),
-      notebook_path: z.string().optional(),
-    })
-    .loose()
-    .optional(),
-});
-
-export type ClaudeHookPayload =
-  | { event: "SessionStart"; sessionId?: string; cwd?: string }
-  | { event: "PreToolUse" | "PostToolUse"; sessionId?: string; cwd?: string; tool: string; file: string };
-
-/** Returns what teamroom cares about in a hook payload, or null when it is none of its business. */
-export function parseClaudeHookPayload(rawPayload: string): ClaudeHookPayload | null {
-  let json: unknown;
-  try {
-    json = JSON.parse(rawPayload);
-  } catch {
-    return null;
-  }
-  const parsed = payloadSchema.safeParse(json);
-  if (!parsed.success) return null;
-  const { hook_event_name: event, session_id: sessionId, cwd, tool_name: tool, tool_input: input } = parsed.data;
-
-  if (event === "SessionStart") return { event, sessionId, cwd };
-  if (event !== "PreToolUse" && event !== "PostToolUse") return null;
-  if (!tool || !(CLAUDE_EDIT_TOOLS as readonly string[]).includes(tool)) return null;
-  const file = input?.file_path ?? input?.notebook_path;
-  return file ? { event, sessionId, cwd, tool, file } : null;
-}
-
-/** What the hook prints on stdout. Claude Code reads it as JSON; an empty string means "carry on". */
-export type HookOutput = string;
-
-/** What teamroom wants from any agent's hook, before it is put in that agent's output format. */
-export type HookDecision = { type: "none" } | { type: "context"; text: string } | { type: "deny"; reason: string };
-
-/** The edit and session events of any agent, in teamroom's own terms. */
-export interface EditHookEvent {
+/**
+ * The same three moments exist in every agent that has hooks, whatever each
+ * calls them: a session starts, an edit is about to happen, an edit happened.
+ * Each agent's adapter translates its own payload into this and back.
+ */
+export interface AgentHookEvent {
   event: "SessionStart" | "PreToolUse" | "PostToolUse";
   sessionId?: string;
+  cwd?: string;
   file?: string;
   /** The agent id recorded on shared edits, such as `claude-code`. */
   agent: string;
 }
 
-export async function handleClaudeHook(payload: ClaudeHookPayload, workspace: Workspace): Promise<HookOutput> {
-  const file = payload.event === "SessionStart" ? undefined : payload.file;
-  const decision = await decideHook({ ...payload, file, agent: CLAUDE_AGENT_ID }, workspace);
-  switch (decision.type) {
-    case "none":
-      return "";
-    case "context":
-      return JSON.stringify({
-        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: decision.text },
-      });
-    case "deny":
-      return JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: decision.reason,
-        },
-      });
-  }
-}
+/** What teamroom wants from any agent's hook, before it is put in that agent's output format. */
+export type HookDecision = { type: "none" } | { type: "context"; text: string } | { type: "deny"; reason: string };
 
-export async function decideHook(event: EditHookEvent, workspace: Workspace): Promise<HookDecision> {
+export async function decideHook(event: AgentHookEvent, workspace: Workspace): Promise<HookDecision> {
   if (event.event === "SessionStart") return { type: "context", text: await sessionBriefing(workspace) };
   if (!event.file) return { type: "none" };
   if (event.event === "PreToolUse") return guardEdit(workspace, event.file, event.sessionId);
@@ -153,7 +93,7 @@ function describeSession(session: SessionSummary): string {
 
 /**
  * Pauses an edit once when another session is changing the same file, with
- * the details, so Claude can tell the user or adjust. Retrying the same edit
+ * the details, so the agent can tell the user or adjust. Retrying the same edit
  * goes through: teamroom informs, it never blocks work for good. Someone new
  * in the file, or a new plan for it, pauses again; more edits from the same
  * session do not.
