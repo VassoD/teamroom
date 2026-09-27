@@ -66,7 +66,7 @@ describe("DashboardApp", () => {
     const frame = app.lastFrame() ?? "";
     expect(frame).toContain("Dark mode");
     expect(frame).toContain("2 people");
-    expect(frame).toContain("1 agent active");
+    expect(frame).toContain("1 agent open");
     expect(frame).toContain("1 file being changed in more than one place");
     expect(frame).toContain("src/theme.ts  alice, bob");
     expect(frame).toContain("Restyling the header only.");

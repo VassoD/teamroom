@@ -43,7 +43,7 @@ export function Header({ dashboard }: HeaderProps): React.JSX.Element {
         <Text dimColor>{"   "}</Text>
         <Text color={COLORS.active}>{totals.activeSessions} working</Text>
         <Text dimColor>{"   "}</Text>
-        <Text color={COLORS.agent}>{plural(totals.activeAgents, "agent")} active</Text>
+        <Text color={COLORS.agent}>{plural(totals.activeAgents, "agent")} open</Text>
         {hasNamedAgents(totals.activeAgentsByLabel) && (
           <Text dimColor> ({describeBreakdown(totals.activeAgentsByLabel)})</Text>
         )}
