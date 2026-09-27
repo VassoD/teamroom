@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { agentLabel } from "../core/agents.js";
@@ -53,7 +54,7 @@ export async function openWorkspace(cwd: string, options: OpenWorkspaceOptions =
         }),
         config.roomId
       )
-    : new LocalBackend(commonDir, member, path.basename(repoRoot));
+    : new LocalBackend(commonDir, member, path.basename(repoRoot), () => liveSessions(rootGit));
   return {
     cwd,
     repoRoot,
@@ -66,6 +67,17 @@ export async function openWorkspace(cwd: string, options: OpenWorkspaceOptions =
     config,
     isIgnored,
   };
+}
+
+/**
+ * Session ids of every worktree that still exists. Git may report a worktree
+ * by a path that differs from its real path, so both spellings count.
+ */
+async function liveSessions(git: Git): Promise<Set<string> | undefined> {
+  const roots = await git.liveWorktreeRoots();
+  if (!roots) return undefined;
+  const realRoots = await Promise.all(roots.map((root) => fs.realpath(root).catch(() => root)));
+  return new Set([...roots, ...realRoots].map(sessionForRepoRoot));
 }
 
 /** Room admin only makes sense for a shared room. */

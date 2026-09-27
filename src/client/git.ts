@@ -11,6 +11,7 @@ const GIT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 const SESSION_HASH_LENGTH = 6;
 const SESSION_PREFIX_MAX_LENGTH = 60;
 const DEFAULT_BRANCH_CANDIDATES = ["origin/main", "origin/master", "main", "master"];
+const WORKTREE_LINE_PREFIX = "worktree ";
 
 export interface GitResult {
   stdout: string;
@@ -92,6 +93,10 @@ export class Git {
   /**
    * Everything this checkout would bring to the default branch: commits since
    * the merge-base, staged and unstaged edits, and untracked files.
+   *
+   * A file changed since the merge-base only counts while it still differs
+   * from the default branch. A squash merge leaves the merge-base where it was,
+   * so without that check a merged branch would keep reporting its files.
    */
   async workingState(): Promise<WorkingState> {
     const [branch, commit, baseRef] = await Promise.all([
@@ -104,13 +109,33 @@ export class Git {
     // --no-renames lists both sides of a rename: someone editing the old path must hear about it.
     const diffBase = ["diff", "--name-only", "--no-relative", "--no-renames", "-z"];
 
-    const [changed, staged, untracked] = await Promise.all([
+    const [changedSinceMergeBase, differsFromBase, staged, untracked] = await Promise.all([
       commit ? this.lines([...diffBase, mergeBase || "HEAD"]) : Promise.resolve([]),
+      mergeBase && baseRef ? this.lines([...diffBase, baseRef]) : Promise.resolve(undefined),
       this.lines([...diffBase, "--cached"]),
       this.lines(["ls-files", "--others", "--exclude-standard", "--full-name", "-z"]),
     ]);
+    const stillDifferent = differsFromBase && new Set(differsFromBase);
+    const changed = stillDifferent
+      ? changedSinceMergeBase.filter((file) => stillDifferent.has(file))
+      : changedSinceMergeBase;
     const files = [...new Set([...changed, ...staged, ...untracked])].sort();
     return { branch, commit, baseRef: mergeBase ? baseRef : undefined, files };
+  }
+
+  /**
+   * Roots of the worktrees of this repo whose directory still exists, or
+   * undefined when git cannot tell, so callers can fall back to trusting every session.
+   */
+  async liveWorktreeRoots(): Promise<string[] | undefined> {
+    const result = await this.run(["worktree", "list", "--porcelain"], this.cwd);
+    if (result.exitCode !== 0) return undefined;
+    return result.stdout
+      .split(/\n\s*\n/)
+      .map((block) => block.split("\n"))
+      .filter((lines) => !lines.some((line) => line === "bare" || line.startsWith("prunable")))
+      .map((lines) => lines.find((line) => line.startsWith(WORKTREE_LINE_PREFIX))?.slice(WORKTREE_LINE_PREFIX.length))
+      .filter((root): root is string => Boolean(root));
   }
 
   private async lines(args: string[]): Promise<string[]> {
@@ -145,3 +170,6 @@ export function sessionForRepoRoot(repoRoot: string): string {
   const suffix = createHash("sha256").update(repoRoot).digest("hex").slice(0, SESSION_HASH_LENGTH);
   return `${readable}-${suffix}`;
 }
+
+/** Matches ids made by `sessionForRepoRoot`, as opposed to ones set by hand with TEAMROOM_SESSION. */
+export const DERIVED_SESSION_PATTERN = new RegExp(`-[0-9a-f]{${SESSION_HASH_LENGTH}}$`);

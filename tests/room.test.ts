@@ -7,7 +7,33 @@ function heartbeat(instance: string): ActivityInput {
   return { kind: "presence", source: "agent", agent: "claude-code", instance, text: "running", files: [] };
 }
 
+function snapshot(session: string, files: string[]): ActivityInput {
+  return { kind: "wip", source: "hook", session, text: "snapshot", files };
+}
+
 describe("appendActivity", () => {
+  it("should keep only the latest snapshot per session", () => {
+    let { room } = createRoom("Dark mode", "ada");
+    for (const files of [["a.ts"], ["a.ts", "b.ts"], ["b.ts"]]) {
+      room = appendActivity(room, "ada", snapshot("wt-a", files)).room;
+    }
+    room = appendActivity(room, "ada", snapshot("wt-b", ["c.ts"])).room;
+
+    expect(room.activity.map((entry) => [entry.session, entry.files])).toEqual([
+      ["wt-a", ["b.ts"]],
+      ["wt-b", ["c.ts"]],
+    ]);
+  });
+
+  it("should keep the newest snapshot with files when the session goes quiet, so its plans can end", () => {
+    let { room } = createRoom("Dark mode", "ada");
+    for (const files of [["a.ts"], ["b.ts"], [], []]) {
+      room = appendActivity(room, "ada", snapshot("wt-a", files)).room;
+    }
+
+    expect(room.activity.map((entry) => entry.files)).toEqual([["b.ts"], []]);
+  });
+
   it("should keep only the latest heartbeat per agent instance", () => {
     let { room } = createRoom("Dark mode", "ada");
     for (const instance of ["tab-one", "tab-two", "tab-one", "tab-one"]) {

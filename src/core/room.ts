@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { latestSnapshotBySession } from "./overlap.js";
+import { sessionKey, snapshotsBySession } from "./overlap.js";
 import type { PostActivityRequest } from "./schemas.js";
 import { hashSecret, newInviteCode, newMemberToken, newRoomId, secretMatchesHash } from "./secrets.js";
 import type { Activity, Member, Room, RoomView } from "./types.js";
@@ -116,7 +116,7 @@ export function appendActivity(
   return {
     room: {
       ...room,
-      activity: trimActivity([...room.activity.filter((previous) => !isReplacedBy(previous, entry)), entry]),
+      activity: trimActivity([...withoutReplaced(room.activity, entry), entry]),
       updatedAt: timestamp,
     },
     entry,
@@ -124,15 +124,19 @@ export function appendActivity(
 }
 
 /**
- * Drops the oldest entries over the limit, but spares each session's latest
- * `wip` snapshot: it is that session's current state, not history, and a
+ * Drops the oldest entries over the limit, but spares the snapshots each
+ * session's state is read from: they are current state, not history, and a
  * quiet session with pending changes must not vanish because others are busy.
  */
 function trimActivity(activity: Activity[]): Activity[] {
   let excess = activity.length - MAX_ACTIVITY_KEPT;
   if (excess <= 0) return activity;
 
-  const current = new Set([...latestSnapshotBySession(activity).values()].map((snapshot) => snapshot.id));
+  const current = new Set(
+    [...snapshotsBySession(activity).values()].flatMap(({ latest, latestWithFiles }) =>
+      latestWithFiles ? [latest.id, latestWithFiles.id] : [latest.id]
+    )
+  );
   const dropped = new Set<string>();
   for (const entry of activity) {
     if (excess === 0) break;
@@ -145,10 +149,22 @@ function trimActivity(activity: Activity[]): Activity[] {
   return kept.slice(-MAX_ACTIVITY_KEPT);
 }
 
-/** Heartbeats only matter as the latest one per agent instance, so older ones are dropped. */
-function isReplacedBy(previous: Activity, next: Activity): boolean {
+/**
+ * Keeps the log to entries that still say something. Heartbeats only matter as
+ * the latest one per agent instance. A snapshot replaces the session's earlier
+ * ones, except the newest with files when the new one is empty, which is how
+ * a finished plan is told apart from one that has not started.
+ */
+function withoutReplaced(activity: Activity[], next: Activity): Activity[] {
+  if (next.kind === "presence") return activity.filter((previous) => !isSameAgentHeartbeat(previous, next));
+  if (next.kind !== "wip") return activity;
+  const key = sessionKey(next);
+  const kept = next.files.length === 0 ? snapshotsBySession(activity).get(key)?.latestWithFiles : undefined;
+  return activity.filter((previous) => previous.kind !== "wip" || sessionKey(previous) !== key || previous === kept);
+}
+
+function isSameAgentHeartbeat(previous: Activity, next: Activity): boolean {
   return (
-    next.kind === "presence" &&
     previous.kind === "presence" &&
     previous.member === next.member &&
     previous.session === next.session &&
