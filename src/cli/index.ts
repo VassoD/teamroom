@@ -17,6 +17,13 @@ import {
 import { ENV, removeConfig, saveConfig } from "../client/config.js";
 import { formatDoctor, runDoctor } from "../client/doctor.js";
 import { describeError, UsageError } from "../client/errors.js";
+import {
+  GEMINI_SETTINGS_FILE,
+  handleGeminiHook,
+  installGeminiHooks,
+  parseGeminiHookPayload,
+  uninstallGeminiHooks,
+} from "../client/gemini-hook.js";
 import { Git } from "../client/git.js";
 import { type CliLocation, installHooks, uninstallHooks } from "../client/hooks.js";
 import { formatInviteLink, normalizeServerUrl, parseInviteLink } from "../client/invite-link.js";
@@ -71,7 +78,7 @@ with any MCP agent: Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe and oth
 Start (one command, no server, no account)
   teamroom init [--agents codex,cursor,gemini]
                                     Git hooks, MCP config for the agents this repo uses,
-                                    AGENTS.md instructions, and Claude Code hooks
+                                    AGENTS.md instructions, and Claude Code and Gemini CLI hooks
   teamroom doctor                   Check the setup and say how to fix what is missing
 
 Daily use
@@ -92,7 +99,7 @@ Share with teammates (optional, needs a server)
   teamroom token rotate             Replace your token, for example after a leak
 
 Maintenance
-  teamroom hooks install | uninstall   Git hooks and Claude Code hooks only
+  teamroom hooks install | uninstall   Git hooks, and Claude Code and Gemini CLI hooks only
 
 Without a shared room, teamroom runs in local mode: the worktrees of this repo on
 this machine see each other through a file in the git directory. Names default to
@@ -298,6 +305,10 @@ const commands: Record<string, Command> = {
     if (action === "install" && claude.change === "installed") {
       print("Restart Claude Code sessions in this repo to pick them up.");
     }
+    if (action === "uninstall" || (await usesGemini(repoRoot, []))) {
+      const gemini = action === "install" ? await installGeminiHooks(repoRoot) : await uninstallGeminiHooks(repoRoot);
+      print(`Gemini CLI hooks: ${gemini.change} (${path.relative(repoRoot, gemini.file)})`);
+    }
     return EXIT_OK;
   },
 
@@ -311,6 +322,23 @@ const commands: Record<string, Command> = {
         maxAttempts: 1,
       });
       const output = await handleClaudeHook(payload, workspace);
+      if (output) print(output);
+    } catch {
+      // Not a git repo, server down, or a file outside the repo: nothing to say.
+    }
+    return EXIT_OK;
+  },
+
+  // Called by Gemini CLI at session start and around each file write. Always exits 0, like `claude-hook`.
+  "gemini-hook": async () => {
+    try {
+      const payload = parseGeminiHookPayload(await readStdin(CLAUDE_HOOK_STDIN_TIMEOUT_MS));
+      if (!payload) return EXIT_OK;
+      const workspace = await openWorkspace(payload.cwd ?? process.cwd(), {
+        timeoutMs: CLAUDE_HOOK_NETWORK_TIMEOUT_MS,
+        maxAttempts: 1,
+      });
+      const output = await handleGeminiHook(payload, workspace);
       if (output) print(output);
     } catch {
       // Not a git repo, server down, or a file outside the repo: nothing to say.
@@ -464,6 +492,23 @@ async function setUp(git: Git, repoRoot: string, steps: SetupSteps): Promise<voi
       `Claude Code hooks (${change}): sessions are briefed on the others, and an edit to a file another session is changing is paused once with the details.`
     );
     if (change === "installed") print("  Restart Claude Code sessions in this repo to pick them up.");
+    if (await usesGemini(repoRoot, steps.agents ?? [])) {
+      const gemini = await installGeminiHooks(repoRoot);
+      print(
+        `Gemini CLI hooks (${gemini.change}): the same briefing and pause, in ${relativeTo(gemini.file)}. Commit it with the MCP config.`
+      );
+    }
+  }
+}
+
+/** Same rule as the MCP config: only when the repo already has a `.gemini` folder, or init was told to. */
+async function usesGemini(repoRoot: string, forced: AgentId[]): Promise<boolean> {
+  if (forced.includes("gemini")) return true;
+  try {
+    await fs.access(path.join(repoRoot, path.dirname(GEMINI_SETTINGS_FILE)));
+    return true;
+  } catch {
+    return false;
   }
 }
 

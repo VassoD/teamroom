@@ -10,6 +10,7 @@ What `teamroom init` installs, how to connect agents it does not configure for y
 | MCP server | any MCP agent | Runs for as long as the agent does. Shares the checkout's changes every few seconds without being asked, and puts a **heads-up** in front of the next tool result when another session starts changing a file this one is changing. Also gives the agent tools to announce a plan and check before editing. |
 | `AGENTS.md` block | Codex, Cursor, and most agents | Tells the agent to announce its plan with `teamroom_post_note` and to call `teamroom_check_overlap` before editing. |
 | Claude Code hooks | Claude Code | See the list below. |
+| Gemini CLI hooks | Gemini CLI | The same three hooks, in `.gemini/settings.json`, when the repo has a `.gemini` folder (or with `--agents gemini`). |
 
 The Claude Code hooks go in `.claude/settings.local.json`, which Claude Code does not commit:
 
@@ -17,6 +18,8 @@ The Claude Code hooks go in `.claude/settings.local.json`, which Claude Code doe
 - **Before an edit:** pauses the edit once when another session is in that file, with who and why. The retry goes through.
 - **After an edit:** shares the edited file the moment it changes.
 - **New worktrees** get these hooks automatically, and teamroom's own tools are pre-approved so they run without a prompt.
+
+The Gemini CLI hooks (`SessionStart`, and `BeforeTool` / `AfterTool` on `write_file` and `replace`) do the same. They go in `.gemini/settings.json` next to the MCP config, which is meant to be committed, so they call `teamroom` on your PATH and do nothing for a teammate who has not installed it.
 
 ## Connecting other agents
 
@@ -53,7 +56,7 @@ Activity is labeled with the agent that sent it, from the name it gives in the M
 
 ```sh
 teamroom leave              # team mode only: leave the room first
-teamroom hooks uninstall    # removes the git hooks and the Claude Code hooks
+teamroom hooks uninstall    # removes the git hooks, and the Claude Code and Gemini CLI hooks
 ```
 
 Then remove what `init` wrote to tracked files: the `teamroom` entry in `.mcp.json` (and in `.cursor/mcp.json`, `.gemini/settings.json` or `.codex/config.toml` if it added one), and the block between `<!-- teamroom:start -->` and `<!-- teamroom:end -->` in `AGENTS.md`. Delete `.git/teamroom/` to drop the local room.

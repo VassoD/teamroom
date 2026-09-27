@@ -28,7 +28,7 @@ const BRIEFING_MAX_SESSIONS = 8;
 const BRIEFING_MAX_FILES = 8;
 const BRIEFING_ACTIVITY_LIMIT = 300;
 const WARNING_STATE_DIR = "claude-warnings";
-/** Warning state is per Claude session. Files older than this belong to sessions long gone. */
+/** Warning state is per agent session. Files older than this belong to sessions long gone. */
 const WARNING_STATE_MAX_AGE_MS = 7 * 24 * HOUR_MS;
 
 const payloadSchema = z.object({
@@ -72,23 +72,52 @@ export function parseClaudeHookPayload(rawPayload: string): ClaudeHookPayload | 
 /** What the hook prints on stdout. Claude Code reads it as JSON; an empty string means "carry on". */
 export type HookOutput = string;
 
+/** What teamroom wants from any agent's hook, before it is put in that agent's output format. */
+export type HookDecision = { type: "none" } | { type: "context"; text: string } | { type: "deny"; reason: string };
+
+/** The edit and session events of any agent, in teamroom's own terms. */
+export interface EditHookEvent {
+  event: "SessionStart" | "PreToolUse" | "PostToolUse";
+  sessionId?: string;
+  file?: string;
+  /** The agent id recorded on shared edits, such as `claude-code`. */
+  agent: string;
+}
+
 export async function handleClaudeHook(payload: ClaudeHookPayload, workspace: Workspace): Promise<HookOutput> {
-  switch (payload.event) {
-    case "SessionStart":
-      return sessionBriefing(workspace);
-    case "PreToolUse":
-      return guardEdit(workspace, payload.file, payload.sessionId);
-    case "PostToolUse":
-      await reportEdit(workspace, { file: payload.file, agent: CLAUDE_AGENT_ID });
+  const file = payload.event === "SessionStart" ? undefined : payload.file;
+  const decision = await decideHook({ ...payload, file, agent: CLAUDE_AGENT_ID }, workspace);
+  switch (decision.type) {
+    case "none":
       return "";
+    case "context":
+      return JSON.stringify({
+        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: decision.text },
+      });
+    case "deny":
+      return JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: decision.reason,
+        },
+      });
   }
 }
 
+export async function decideHook(event: EditHookEvent, workspace: Workspace): Promise<HookDecision> {
+  if (event.event === "SessionStart") return { type: "context", text: await sessionBriefing(workspace) };
+  if (!event.file) return { type: "none" };
+  if (event.event === "PreToolUse") return guardEdit(workspace, event.file, event.sessionId);
+  await reportEdit(workspace, { file: event.file, agent: event.agent });
+  return { type: "none" };
+}
+
 /**
- * Tells a new Claude session who else is working in the repo and on what, so
+ * Tells a new agent session who else is working in the repo and on what, so
  * it can plan around them before it touches anything.
  */
-async function sessionBriefing(workspace: Workspace): Promise<HookOutput> {
+async function sessionBriefing(workspace: Workspace): Promise<string> {
   const { room, me } = await workspace.backend.getRoom(BRIEFING_ACTIVITY_LIMIT);
   const now = new Date();
   const others = buildDashboard(room, me, now, workspace.isIgnored)
@@ -112,7 +141,7 @@ async function sessionBriefing(workspace: Workspace): Promise<HookOutput> {
       UNTRUSTED_TEXT_NOTICE
     );
   }
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") } });
+  return lines.join("\n");
 }
 
 function describeSession(session: SessionSummary): string {
@@ -129,16 +158,20 @@ function describeSession(session: SessionSummary): string {
  * in the file, or a new plan for it, pauses again; more edits from the same
  * session do not.
  */
-async function guardEdit(workspace: Workspace, file: string, claudeSessionId: string | undefined): Promise<HookOutput> {
+async function guardEdit(
+  workspace: Workspace,
+  file: string,
+  agentSessionId: string | undefined
+): Promise<HookDecision> {
   const repoPath = toRepoPath(workspace, file);
-  if (isOutsideRepo(repoPath) || workspace.isIgnored(repoPath)) return "";
+  if (isOutsideRepo(repoPath) || workspace.isIgnored(repoPath)) return { type: "none" };
 
   const { overlaps } = await checkOverlap(workspace, { files: [repoPath] });
-  if (overlaps.length === 0) return "";
+  if (overlaps.length === 0) return { type: "none" };
 
   const signature = overlapSignature(overlaps.flatMap((overlap) => overlap.touchedBy));
-  const state = new WarningState(workspace.commonDir, claudeSessionId);
-  if ((await state.lastWarned(repoPath)) === signature) return "";
+  const state = new WarningState(workspace.commonDir, agentSessionId);
+  if ((await state.lastWarned(repoPath)) === signature) return { type: "none" };
   await state.remember(repoPath, signature);
 
   const reason = [
@@ -148,20 +181,18 @@ async function guardEdit(workspace: Workspace, file: string, claudeSessionId: st
     "This edit was paused once so you can decide. If it is still the right move, retry the same edit and it will go through.",
     "Otherwise tell the user who else is in this file, or do other parts of the task first.",
   ].join("\n");
-  return JSON.stringify({
-    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
-  });
+  return { type: "deny", reason };
 }
 
-/** Which overlaps a Claude session was already told about, one small file per session. */
+/** Which overlaps an agent session was already told about, one small file per session. */
 class WarningState {
   private readonly file: string | undefined;
 
-  constructor(gitCommonDir: string, claudeSessionId: string | undefined) {
+  constructor(gitCommonDir: string, agentSessionId: string | undefined) {
     const dir = path.join(localStoreDir(gitCommonDir), WARNING_STATE_DIR);
     // Without a session id there is nothing to remember against, so every overlap pauses.
-    this.file = claudeSessionId
-      ? path.join(dir, `${createHash("sha256").update(claudeSessionId).digest("hex").slice(0, 32)}.json`)
+    this.file = agentSessionId
+      ? path.join(dir, `${createHash("sha256").update(agentSessionId).digest("hex").slice(0, 32)}.json`)
       : undefined;
   }
 
