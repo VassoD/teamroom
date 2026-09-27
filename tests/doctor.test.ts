@@ -127,3 +127,67 @@ describe("teamroom doctor", () => {
     expect(checks.some((check) => check.name === "Token")).toBe(false);
   });
 });
+
+describe("teamroom doctor with a custom git hooks folder", () => {
+  let repo: string;
+
+  beforeAll(async () => {
+    repo = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "teamroom-doctor-hookspath-")));
+    await execFileAsync("git", ["init", "--quiet", "-b", "main"], { cwd: repo });
+  });
+
+  afterAll(async () => {
+    await fs.rm(repo, { recursive: true, force: true });
+  });
+
+  async function hooksFolderCheck(hooksPath: string | undefined): Promise<DoctorCheck | undefined> {
+    if (hooksPath) await execFileAsync("git", ["config", "core.hooksPath", hooksPath], { cwd: repo });
+    else await execFileAsync("git", ["config", "--unset-all", "core.hooksPath"], { cwd: repo }).catch(() => undefined);
+    const checks = await runDoctor(repo, { env: CLEAN_ENV, commandOnPath: onPath });
+    return checks.find((check) => check.name === "Git hooks folder");
+  }
+
+  it("should warn that husky 9 rewrites its hooks folder and say where teamroom belongs instead", async () => {
+    const check = await hooksFolderCheck(".husky/_");
+
+    expect(check?.status).toBe("warn");
+    expect(check?.detail).toContain("rewrites that folder");
+    const checks = await runDoctor(repo, { env: CLEAN_ENV, commandOnPath: onPath });
+    expect(checks.find((candidate) => candidate.name === "Git hooks")?.fix).toBe("see Git hooks folder below");
+    expect(check?.fix).toContain(".husky/post-commit");
+    expect(check?.fix).toContain("teamroom report --source hook --quiet");
+  });
+
+  it("should count hooks husky runs teamroom from, once the fix is applied", async () => {
+    await fs.mkdir(path.join(repo, ".husky"), { recursive: true });
+    const fix = (await hooksFolderCheck(".husky/_"))?.fix ?? "";
+    const line = fix.slice(fix.indexOf("`") + 1, fix.indexOf("`", fix.indexOf("`") + 1));
+    for (const hook of ["post-commit", "post-checkout", "post-merge", "post-rewrite"]) {
+      await fs.writeFile(path.join(repo, ".husky", hook), `npx lint-staged\n${line}\n`);
+    }
+
+    const checks = await runDoctor(repo, { env: CLEAN_ENV, commandOnPath: onPath });
+
+    expect(statusOf(checks, "Git hooks")).toBe("ok");
+    expect(statusOf(checks, "Git hooks folder")).toBe("ok");
+    await fs.rm(path.join(repo, ".husky"), { recursive: true, force: true });
+  });
+
+  it("should warn that older husky commits the hook files teamroom would write its paths into", async () => {
+    const check = await hooksFolderCheck(".husky");
+
+    expect(check?.status).toBe("warn");
+    expect(check?.detail).toContain("committed");
+  });
+
+  it("should only mention other hooks folders", async () => {
+    const check = await hooksFolderCheck("tools/git-hooks");
+
+    expect(check?.status).toBe("ok");
+    expect(check?.detail).toContain("tools/git-hooks");
+  });
+
+  it("should say nothing when git uses its default hooks folder", async () => {
+    expect(await hooksFolderCheck(undefined)).toBeUndefined();
+  });
+});
