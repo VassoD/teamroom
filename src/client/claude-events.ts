@@ -11,8 +11,11 @@ import {
   formatAge,
   formatOverlaps,
   isOutsideRepo,
+  oneLine,
+  quoted,
   reportEdit,
   toRepoPath,
+  UNTRUSTED_TEXT_NOTICE,
   type Workspace,
 } from "./workspace.js";
 
@@ -105,17 +108,18 @@ async function sessionBriefing(workspace: Workspace): Promise<HookOutput> {
     lines.push("", `Other sessions changing files right now (${others.length}):`, ...others.map(describeSession));
     lines.push(
       "",
-      "Avoid these files unless the task needs them. If it does, tell the user who else is in them before editing."
+      "Avoid these files unless the task needs them. If it does, tell the user who else is in them before editing.",
+      UNTRUSTED_TEXT_NOTICE
     );
   }
   return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") } });
 }
 
 function describeSession(session: SessionSummary): string {
-  const where = [session.session, session.branch && `on ${session.branch}`].filter(Boolean).join(" ");
-  const shown = session.files.slice(0, BRIEFING_MAX_FILES).join(", ");
+  const where = [session.session, session.branch && `on ${oneLine(session.branch)}`].filter(Boolean).join(" ");
+  const shown = session.files.slice(0, BRIEFING_MAX_FILES).map(oneLine).join(", ");
   const more = session.files.length > BRIEFING_MAX_FILES ? ` (+${session.files.length - BRIEFING_MAX_FILES} more)` : "";
-  return `- ${session.member} in ${where}, ${formatAge(session.lastSeen)}: ${session.doing}\n  files: ${shown}${more}`;
+  return `- ${oneLine(session.member)} in ${where}, ${formatAge(session.lastSeen)}: ${quoted(session.doing)}\n  files: ${shown}${more}`;
 }
 
 /**

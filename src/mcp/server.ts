@@ -2,7 +2,17 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import { describeError } from "../client/errors.js";
-import { checkOverlap, formatAge, formatOverlaps, postNote, reportWork, type Workspace } from "../client/workspace.js";
+import {
+  checkOverlap,
+  formatAge,
+  formatOverlaps,
+  oneLine,
+  postNote,
+  quoted,
+  reportWork,
+  UNTRUSTED_TEXT_NOTICE,
+  type Workspace,
+} from "../client/workspace.js";
 import { agentLabel, normalizeAgentId } from "../core/agents.js";
 import { MAX_ACTIVITY_KEPT } from "../core/room.js";
 import { MAX_OVERLAP_WINDOW_HOURS, MAX_TEXT_LENGTH } from "../core/schemas.js";
@@ -128,14 +138,12 @@ const TOOLS = [
       const { room } = await workspace.backend.getRoom(input.limit ?? DEFAULT_RECENT_LIMIT);
       const shown = room.activity.filter((entry) => entry.kind !== "presence");
       if (shown.length === 0) return "No activity yet.";
-      return [...shown]
-        .reverse()
-        .map((entry) => {
-          const files = entry.files.length > 0 ? ` [${entry.files.length} file(s)]` : "";
-          const via = entry.agent ? ` via ${agentLabel(entry.agent)}` : "";
-          return `- ${entry.member}${via} (${entry.kind}, ${formatAge(entry.createdAt)}): ${entry.text}${files}`;
-        })
-        .join("\n");
+      const lines = [...shown].reverse().map((entry) => {
+        const files = entry.files.length > 0 ? ` [${entry.files.length} file(s)]` : "";
+        const via = entry.agent ? ` via ${agentLabel(entry.agent)}` : "";
+        return `- ${oneLine(entry.member)}${via} (${entry.kind}, ${formatAge(entry.createdAt)}): ${quoted(entry.text)}${files}`;
+      });
+      return [...lines, UNTRUSTED_TEXT_NOTICE].join("\n");
     },
   }),
 ];

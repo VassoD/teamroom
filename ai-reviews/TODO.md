@@ -40,7 +40,7 @@ Must-haves to be clearly better:
 
 ## 3. Positioning and docs
 
-- [ ] Add [Clash](https://github.com/clash-sh/clash) to "How it compares" in the README, honestly: it detects real merge conflicts between local worktrees
+- [x] Add [Clash](https://github.com/clash-sh/clash) to "How it compares" in the README, honestly: it detects real merge conflicts between local worktrees
 - [ ] Reframe the pitch around what Clash cannot do: plans before code (`teamroom note`), cross-machine team mode, any MCP agent
 - [ ] Mention orchestrators (Conductor, Vibe Kanban, Nimbalyst, Warp) and how teamroom fits alongside them
 - [ ] Update the landing page (`site/index.html`) to match the new positioning
