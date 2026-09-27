@@ -4,6 +4,10 @@
   "description": "Run coding agents in parallel without them stepping on each other's files. Works with Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe and any MCP agent.",
   "license": "MIT",
   "author": "Vasiliki Doropoulou",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VassoD/teamroom.git"
+  },
   "type": "module",
   "bin": {
     "teamroom": "dist/cli/index.js"

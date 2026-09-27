@@ -81,104 +81,23 @@ Clean up from the main checkout with `git worktree remove --force ../try-a && gi
 ## How it works
 
 - **Sessions, not people.** Every checkout (worktree, clone, agent box) is its own session. Two agents of the same developer in two worktrees warn each other.
-- **Snapshots replace each other.** A session's newest snapshot replaces its previous one and the agent edits before it, so once you merge, revert or switch branches, the warnings go away.
-- **Hooks are enforced, tools are a request.** The git hooks, the MCP server's background reports and the Claude Code hooks run whatever the model decides, so the room stays accurate even when an agent ignores its instructions.
-- **Noise stays out.** Lockfiles never count as overlap. Add your own patterns (generated code, snapshots) to a `.teamroomignore` at the repo root, gitignore style, with `!` to re-include.
-- **Nothing blocks git, and nothing blocks an agent for good.** A paused Claude edit goes through on retry; hooks exit cleanly when the room cannot be read.
-
-## What `init` sets up
-
-| Piece | Works with | What it does |
-| --- | --- | --- |
-| Git hooks | everything | After each commit, checkout, merge and rebase, shares the files this checkout changed compared with `main`, including uncommitted and untracked ones. Runs in the background and never fails a commit. |
-| MCP server | any MCP agent | Runs for as long as the agent does. Shares the checkout's changes every few seconds without being asked, and puts a **heads-up** in front of the next tool result when another session starts changing a file this one is changing. Also gives the agent tools to announce a plan and check before editing. |
-| `AGENTS.md` block | Codex, Cursor, and most agents | Tells the agent to announce its plan with `teamroom_post_note` and to call `teamroom_check_overlap` before editing. |
-| Claude Code hooks | Claude Code | See the list below. |
-
-The Claude Code hooks go in `.claude/settings.local.json`, which Claude Code does not commit:
-
-- **Session start:** briefs each new session on what the others are changing.
-- **Before an edit:** pauses the edit once when another session is in that file, with who and why. The retry goes through.
-- **After an edit:** shares the edited file the moment it changes.
-- **New worktrees** get these hooks automatically, and teamroom's own tools are pre-approved so they run without a prompt.
-
-MCP config is written for Claude Code (`.mcp.json`) always, and for Cursor (`.cursor/mcp.json`), Gemini CLI (`.gemini/settings.json`) and Codex (`.codex/config.toml`) when the repo already has that folder. Force one with `teamroom init --agents codex,gemini`. For anything else, add a stdio MCP server with command `teamroom` and args `["mcp"]`. Examples:
-
-```toml
-# Codex, ~/.codex/config.toml (a project .codex/config.toml only loads in trusted projects)
-[mcp_servers.teamroom]
-command = "teamroom"
-args = ["mcp"]
-
-# Mistral Vibe, ~/.vibe/config.toml
-[[mcp_servers]]
-name = "teamroom"
-transport = "stdio"
-command = "teamroom"
-args = ["mcp"]
-```
-
-## MCP tools
-
-| Tool | What it does |
-| --- | --- |
-| `teamroom_post_note` | Announce a plan and the files it will touch, before editing |
-| `teamroom_check_overlap` | Who else is changing these files (default: everything this checkout changed) |
-| `teamroom_report_work` | Share this checkout's changes now, with an optional one-line note |
-| `teamroom_recent_activity` | What other sessions and agents did recently |
-
-Activity is labeled with the agent that sent it, from the name it gives in the MCP handshake.
+- **It watches, it does not ask.** Git hooks, the MCP server and Claude Code hooks share each checkout's changes on their own, so the room stays accurate even when an agent ignores its instructions. [docs/setup.md](docs/setup.md) lists every piece `init` installs.
+- **Warnings clear themselves.** A session's newest snapshot replaces the old one, so once you merge, revert or switch branches, the warning goes away.
+- **Nothing blocks for good.** A paused Claude edit goes through on retry, and git is never blocked.
 
 ## Daily use
 
 ```sh
 teamroom watch                    # live dashboard
 teamroom check                    # who else is changing the files you changed
-teamroom check src/auth.ts        # or specific files
 teamroom note "renaming User to Account" --files src/user.ts,src/db/schema.ts
-teamroom report                   # share your changes now (hooks do this on commit and checkout)
-teamroom status                   # recent activity
 ```
 
-`teamroom check` exits `3` when someone else is changing one of the files, so scripts and CI can act on it:
-
-```sh
-teamroom check || echo "someone else is in these files"
-```
+More commands, `.teamroomignore`, environment variables and limits are in [docs/reference.md](docs/reference.md).
 
 ## Team mode
 
-Local mode covers every worktree on one machine. To include teammates and their agents on other machines, run a server somewhere your team can reach:
-
-```sh
-npx teamroom serve --host 0.0.0.0 --port 8787 --data-dir /var/lib/teamroom
-```
-
-Put it behind HTTPS, and pass `--trust-proxy` only when that proxy sets `X-Forwarded-For`. [docs/hosting.md](docs/hosting.md) covers Fly.io, Docker, the environment variables, and how to restrict who can create rooms.
-
-In your repo, one person creates the room:
-
-```sh
-teamroom create --server https://teamroom.example.com
-```
-
-It names the room after the repo folder and you after your git `user.name` (override with `--room-name` and `--name`), sets up the repo like `init`, and prints an invite link. Anyone who has the link can join, so share it privately. Teammates run, inside their clone:
-
-```sh
-teamroom join 'https://teamroom.example.com/join/room_...#tri_...'
-```
-
-Membership is saved to `.git/teamroom.json` (mode `600`, never committed) and every worktree shares it. The invite code sits after the `#`, which browsers never send, so it stays out of server logs. Without a scheme, `--server` defaults to `https://` (and `http://` for localhost).
-
-`teamroom leave` removes you from the room and returns the repo to local mode.
-
-Room admin:
-
-```sh
-teamroom invite rotate            # owner only; the old invite stops working
-teamroom member remove bo         # owner only, or yourself; revokes the token
-teamroom token rotate             # replace your own token, for example after a leak
-```
+Local mode covers every worktree on one machine. To include teammates and their agents on other machines, run a small server and point the repo at it with `teamroom create --server <url>`. Teammates join with the invite link it prints. See [docs/team-mode.md](docs/team-mode.md) and [docs/hosting.md](docs/hosting.md).
 
 ## How it compares
 
@@ -190,33 +109,12 @@ teamroom token rotate             # replace your own token, for example after a 
 
 File paths, branch names, commit ids, short notes, member and agent names. Never file contents. In local mode nothing leaves your machine: the room is `.git/teamroom/`, readable only by you. On a server, tokens and invite codes are stored as SHA-256 hashes.
 
-## Environment variables
+## Docs
 
-| Variable | Purpose |
-| --- | --- |
-| `TEAMROOM_SESSION` | Name this checkout's session (default: folder name plus a short hash of its path) |
-| `TEAMROOM_MEMBER` | Your name (default: git `user.name`) |
-| `TEAMROOM_AUTO_REPORT=0` | Stop `teamroom mcp` from sharing changes in the background |
-| `TEAMROOM_SERVER`, `TEAMROOM_ROOM`, `TEAMROOM_TOKEN` | Override `.git/teamroom.json`, for CI or shared agent machines |
-
-## Limits
-
-- The room keeps the latest 1000 entries. Overlap looks back 72 hours by default (`--since-hours`, up to 90 days).
-- A snapshot holds up to 200 files. Larger change sets are truncated and the CLI says so.
-- On a server, rate limits are kept in memory per process, and rooms are stored as one JSON file each. That is fine for teams, not for thousands of active rooms.
-
-## Uninstall
-
-```sh
-teamroom leave              # team mode only: leave the room first
-teamroom hooks uninstall    # removes the git hooks and the Claude Code hooks
-```
-
-Then remove what `init` wrote to tracked files: the `teamroom` entry in `.mcp.json` (and in `.cursor/mcp.json`, `.gemini/settings.json` or `.codex/config.toml` if it added one), and the block between `<!-- teamroom:start -->` and `<!-- teamroom:end -->` in `AGENTS.md`. Delete `.git/teamroom/` to drop the local room.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and releases.
+- [Setup](docs/setup.md): what `init` installs, connecting other agents, MCP tools, uninstall
+- [Reference](docs/reference.md): commands, ignoring files, environment variables, limits
+- [Team mode](docs/team-mode.md) and [Hosting](docs/hosting.md)
+- [Contributing](CONTRIBUTING.md): development setup and releases
 
 ## License
 
