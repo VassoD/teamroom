@@ -11,7 +11,7 @@ You have Claude Code refactoring auth in one worktree, Codex building a feature 
 
 ## What it looks like
 
-A Claude Code session in `app-login` tries to edit `src/auth.ts` while another session in `app-auth` is changing it. teamroom pauses the edit once and tells the agent who and why:
+A Claude Code or Gemini CLI session in `app-login` tries to edit `src/auth.ts` while another session in `app-auth` is changing it. teamroom pauses the edit once and tells the agent who and why:
 
 ```text
 teamroom: src/auth.ts is also being changed in another checkout:
@@ -23,7 +23,7 @@ This edit was paused once so you can decide. If it is still the right move, retr
 Otherwise tell the user who else is in this file, or do other parts of the task first.
 ```
 
-Agents without hooks (Codex, Cursor, Gemini CLI) get the same news through the MCP server. The next teamroom tool result starts with:
+Agents without hooks (Codex, Cursor) get the same news through the MCP server, but only when they next call a teamroom tool. That result starts with:
 
 ```text
 Heads up: another session just started changing files you are changing. Tell the user before you go further.
@@ -83,7 +83,7 @@ Clean up from the main checkout with `git worktree remove --force ../try-a && gi
 ## How it works
 
 - **Sessions, not people.** Every checkout (worktree, clone, agent box) is its own session. Two agents of the same developer in two worktrees warn each other.
-- **It watches, it does not ask.** Git hooks, the MCP server and Claude Code hooks share each checkout's changes on their own, so the room stays accurate even when an agent ignores its instructions. [docs/setup.md](docs/setup.md) lists every piece `init` installs.
+- **It watches, it does not ask.** Git hooks, the MCP server, and Claude Code and Gemini CLI hooks share each checkout's changes on their own, so the room stays accurate even when an agent ignores its instructions. [docs/setup.md](docs/setup.md) lists every piece `init` installs.
 - **Warnings clear themselves.** A session's newest snapshot replaces the old one, so once you merge, revert or switch branches, the warning goes away.
 - **Nothing blocks for good.** A paused Claude edit goes through on retry, and git is never blocked.
 
@@ -105,7 +105,7 @@ Local mode covers every worktree on one machine. To include teammates and their 
 
 - **[Clash](https://github.com/clash-sh/clash)** runs `git merge-tree` between local worktrees, so it reports real merge conflicts, not just "same file". That is a sharper signal than teamroom's file-level warnings today. teamroom covers what Clash does not: plans before any code exists (`teamroom note`), teammates on other machines, and agents warned through MCP and hooks rather than by a person reading a report.
 - **Worktree orchestrators** give each agent its own checkout, which stops agents from overwriting each other's files but leaves the conflict for merge time. teamroom adds the missing warning on top of worktrees.
-- **Claim and intent protocols** such as [Foremerge](https://github.com/naw103/foremerge) and [agent-claim-mcp](https://github.com/vk0dev/agent-claim-mcp) work when agents declare what they will change. Foremerge in particular reasons about symbols and plans, not just files. teamroom instead watches what agents actually change, through git and Claude Code hooks, so an agent that forgets to declare still shows up. It also works across machines. The two approaches combine well.
+- **Claim and intent protocols** such as [Foremerge](https://github.com/naw103/foremerge) and [agent-claim-mcp](https://github.com/vk0dev/agent-claim-mcp) work when agents declare what they will change. Foremerge in particular reasons about symbols and plans, not just files. teamroom instead watches what agents actually change, through git and agent hooks, so an agent that forgets to declare still shows up. It also works across machines. The two approaches combine well.
 - **Editor tools for people** such as [GitLive](https://git.live) show teammates' changes in your editor. teamroom is built for agents: it speaks MCP, and it can pause an agent's edit before the conflict happens.
 
 ## What is shared

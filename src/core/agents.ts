@@ -7,6 +7,8 @@ const KNOWN_CLIENTS: Record<string, { id: string; label: string }> = {
   "claude-code": { id: "claude-code", label: "Claude Code" },
   "codex-mcp-client": { id: "codex", label: "Codex" },
   codex: { id: "codex", label: "Codex" },
+  // Recorded by teamroom's own Gemini CLI hook on the edits it shares.
+  "gemini-cli": { id: "gemini-cli", label: "Gemini CLI" },
 };
 
 export const MAX_AGENT_ID_LENGTH = 40;
