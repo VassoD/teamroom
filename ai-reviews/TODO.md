@@ -72,4 +72,4 @@ Must-haves to be clearly better:
 ## 7. Security
 
 - [x] Quote other sessions' notes, branch and member names before agents read them, so a note cannot pose as instructions
-- [ ] Detect `core.hooksPath` (husky and similar) in `teamroom doctor`: git hooks land in files husky regenerates
+- [x] Detect `core.hooksPath` (husky and similar) in `teamroom doctor`: git hooks land in files husky regenerates

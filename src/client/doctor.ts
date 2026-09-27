@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import { promisify } from "node:util";
 import { agentHookStatus } from "./agent-hooks.js";
 import { agentsMdHasTeamroom } from "./agents-md.js";
@@ -62,8 +63,11 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
         }
   );
 
-  const hooks = await installedHooks(await git.hooksDir());
-  const missingHooks = HOOK_NAMES.filter((name) => !hooks.includes(name));
+  const hooksPath = await git.hooksPathSetting();
+  const huskyDir = hooksPath && HUSKY_HOOKS_DIR.test(hooksPath) ? huskyRoot(repoRoot, hooksPath) : undefined;
+  const viaHusky = huskyDir ? await hooksCallingTeamroom(huskyDir) : [];
+  const hooks = new Set([...(await installedHooks(await git.hooksDir())), ...viaHusky]);
+  const missingHooks = HOOK_NAMES.filter((name) => !hooks.has(name));
   checks.push(
     missingHooks.length === 0
       ? { name: "Git hooks", status: "ok", detail: "Commits, checkouts, merges and rebases are reported." }
@@ -71,9 +75,17 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
           name: "Git hooks",
           status: "warn",
           detail: `Missing: ${missingHooks.join(", ")}. Your work is only shared when you run \`teamroom report\`.`,
-          fix: "teamroom init",
+          fix: huskyDir ? "see Git hooks folder below" : "teamroom init",
         }
   );
+  if (hooksPath) {
+    const huskyDone = huskyDir !== undefined && viaHusky.length === HOOK_NAMES.length;
+    checks.push(
+      huskyDone
+        ? { name: "Git hooks folder", status: "ok", detail: "husky runs teamroom from its own hook files." }
+        : describeHooksPath(hooksPath)
+    );
+  }
 
   const { withHooks, mcpOnly } = await agentHookStatus(repoRoot).catch(() => ({ withHooks: [], mcpOnly: [] }));
   const incomplete = withHooks.filter((status) => status.missingEvents.length > 0);
@@ -198,6 +210,53 @@ export async function runDoctor(cwd: string, options: DoctorOptions = {}): Promi
     });
   }
   return checks;
+}
+
+const HUSKY_HOOKS_DIR = /(^|\/)\.husky(\/_)?\/?$/;
+const HUSKY_GENERATED_DIR = /(^|\/)\.husky\/_\/?$/;
+/** Committed by the repo, so it only names `teamroom` on PATH and does nothing where it is not installed. */
+const HUSKY_REPORT_COMMAND = "teamroom report --source hook";
+const HUSKY_REPORT_LINE = `command -v teamroom >/dev/null 2>&1 && (${HUSKY_REPORT_COMMAND} --quiet >/dev/null 2>&1 &)`;
+const HUSKY_HOOK_FILES = HOOK_NAMES.map((name) => `.husky/${name}`).join(", ");
+
+/** husky 9 points git at the generated `.husky/_` and runs the hook files one folder up. */
+function huskyRoot(repoRoot: string, hooksPath: string): string {
+  const resolved = path.resolve(repoRoot, hooksPath);
+  return path.basename(resolved) === "_" ? path.dirname(resolved) : resolved;
+}
+
+/** Hooks whose husky file already runs `teamroom report`, as the fix below suggests. */
+async function hooksCallingTeamroom(huskyDir: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const name of HOOK_NAMES) {
+    const content = await fs.readFile(path.join(huskyDir, name), "utf8").catch(() => "");
+    if (content.includes(HUSKY_REPORT_COMMAND)) found.push(name);
+  }
+  return found;
+}
+
+/**
+ * teamroom installs its git hooks wherever git runs hooks from. When a tool
+ * owns that folder, the hooks can vanish on the tool's next install, or end
+ * up in committed files with this machine's paths in them.
+ */
+function describeHooksPath(hooksPath: string): DoctorCheck {
+  if (!HUSKY_HOOKS_DIR.test(hooksPath)) {
+    return {
+      name: "Git hooks folder",
+      status: "ok",
+      detail: `core.hooksPath is ${hooksPath}. If a tool regenerates that folder, run \`teamroom doctor\` afterwards to check teamroom's hooks are still there.`,
+    };
+  }
+  const problem = HUSKY_GENERATED_DIR.test(hooksPath)
+    ? "husky rewrites that folder on every install, which silently removes teamroom's git hooks"
+    : "husky's hook files are committed, so teamroom's hooks there carry this machine's paths to everyone";
+  return {
+    name: "Git hooks folder",
+    status: "warn",
+    detail: `core.hooksPath is ${hooksPath}, managed by husky: ${problem}.`,
+    fix: `add \`${HUSKY_REPORT_LINE}\` to ${HUSKY_HOOK_FILES} (remove any teamroom block there) and commit them`,
+  };
 }
 
 export function formatDoctor(checks: DoctorCheck[]): string {

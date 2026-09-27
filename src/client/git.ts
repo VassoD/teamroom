@@ -67,6 +67,11 @@ export class Git {
     return path.resolve(this.cwd, dir);
   }
 
+  /** The `core.hooksPath` setting, set when a tool such as husky moves git's hooks folder. */
+  async hooksPathSetting(): Promise<string | undefined> {
+    return (await this.optional(["config", "--get", "core.hooksPath"])) || undefined;
+  }
+
   async userName(): Promise<string | undefined> {
     return (await this.optional(["config", "user.name"])) || undefined;
   }
