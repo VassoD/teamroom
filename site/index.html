@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>teamroom</title>
-<meta name="description" content="Know what your teammates and their coding agents are touching before the merge conflict does.">
+<title>teamroom — Know when your agents' work overlaps.</title>
+<meta name="description" content="Warn coding agents about overlapping work across worktrees, tools, and teammates. Keep your worktrees; share file activity and plans before integration.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -80,7 +80,7 @@
     letter-spacing: -0.045em;
     font-weight: 800;
     margin: 0 0 22px;
-    max-width: 13ch;
+    max-width: 18ch;
   }
   .hero h1 mark {
     background: none;
@@ -91,9 +91,16 @@
     background-position: 0 88%;
   }
   .hero p { font-size: 20px; color: var(--muted); max-width: 46ch; margin: 0; }
+  .hero .hero-detail { font-size: 16px; max-width: 62ch; margin-top: 16px; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center; margin-top: 24px; }
+  .hero-actions a { font-weight: 700; }
+  .hero-actions .primary { padding: 10px 20px; border-radius: 999px; background: var(--ink); color: var(--paper); text-decoration: none; }
 
   /* Replay */
   .replay { margin: 40px 0 16px; }
+  .replay h2 { font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 10px; }
+  .replay-intro { color: var(--muted); max-width: var(--measure); margin: 0 0 20px; }
+  .replay-note { color: var(--muted); font-size: 14px; max-width: var(--measure); margin: 20px 0 0; }
   .panes {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
@@ -153,6 +160,19 @@
   section.block { padding: 72px 0 8px; }
   section.block h2 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 14px; font-weight: 800; max-width: 30ch; text-wrap: balance; }
   section.block > .wrap > p { max-width: var(--measure); color: var(--muted); margin: 0 0 28px; }
+  .comparison { width: 100%; border-collapse: collapse; font-size: 16px; }
+  .comparison th, .comparison td { text-align: left; vertical-align: top; padding: 16px; border-bottom: 1px solid var(--rule); }
+  .comparison thead { border-top: 2px solid var(--ink); }
+  .comparison thead th { font-weight: 800; }
+  .comparison tbody th { font-weight: 500; width: 42%; }
+  .comparison tr > :last-child { background: color-mix(in srgb, var(--overlap) 13%, var(--surface)); }
+  .comparison-wrap { overflow-x: auto; margin-bottom: 20px; }
+  .comparison-note { font-size: 14px; }
+  @media (max-width: 600px) {
+    .comparison { font-size: 13px; }
+    .comparison th, .comparison td { padding: 12px 8px; }
+    .comparison tbody th { width: 38%; }
+  }
 
   .nets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; border-top: 2px solid var(--ink); }
   @media (max-width: 900px) { .nets { grid-template-columns: 1fr; } }
@@ -212,6 +232,7 @@
   <header class="top">
     <a class="brand" href="#"><span aria-hidden="true"></span>teamroom</a>
     <nav>
+      <a href="#worktrees">Why teamroom?</a>
       <a href="#how">How it works</a>
       <a href="#start">Get started</a>
       <a href="https://github.com/VassoD/teamroom">GitHub</a>
@@ -219,11 +240,18 @@
   </header>
 
   <section class="hero">
-    <h1>Run agents in parallel. <mark>Skip the merge conflicts.</mark></h1>
-    <p>teamroom tells every coding agent which files the others are changing, before it edits them. Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe, or any agent that speaks MCP. One command, no server.</p>
+    <h1>Run agents in parallel.<br><mark>Know when their work overlaps.</mark></h1>
+    <p>teamroom shares file activity and plans across Claude Code, Codex, Cursor, Gemini CLI, and your teammates—even before changes are committed or pushed.</p>
+    <p class="hero-detail">Local by default. No server required.</p>
+    <div class="hero-actions">
+      <a class="primary" href="#start">Get started</a>
+      <a href="#demo">See it in action</a>
+    </div>
   </section>
 
-  <section class="replay" aria-label="Replay: how teamroom keeps two agents apart">
+  <section class="replay" id="demo" aria-labelledby="replay-title">
+    <h2 id="replay-title">Two worktrees. One shared file to think about.</h2>
+    <p class="replay-intro">Codex is updating the theme. Claude Code is changing the header. Both need <code>src/theme.ts</code>. Worktrees keep their edits separate; teamroom surfaces the overlap.</p>
     <div class="panes">
       <div class="pane">
         <header><i class="who alice" aria-hidden="true"></i>Worktree 1 <small>Codex, feat/theme</small></header>
@@ -242,21 +270,45 @@
     <div class="controls">
       <button type="button" class="secondary" id="btn-back">Back</button>
       <button type="button" id="btn-next">Start the replay</button>
-      <p class="caption" id="caption"><strong id="caption-step">Five steps, about a minute</strong><span id="caption-text">Two agents, two worktrees, one repo. They are about to need the same file.</span></p>
+      <p class="caption" id="caption"><strong id="caption-step">Illustrative walkthrough · five steps</strong><span id="caption-text">Their files are isolated. Their tasks still overlap. Step through how a warning can help them adjust.</span></p>
       <div class="progress" id="progress" aria-hidden="true"></div>
     </div>
+    <p class="replay-note">This example shows a possible response to a warning, not a guarantee of a clean merge. Claude Code and Gemini CLI hooks pause overlapping edits once. Other teamroom integrations rely on MCP checks; background warnings arrive on the next teamroom tool call.</p>
   </section>
 </div>
 
+<section class="block" id="worktrees">
+  <div class="wrap">
+    <h2>Worktrees isolate the edits.<br>teamroom shares the context.</h2>
+    <p><a href="https://code.claude.com/docs/en/common-workflows#run-parallel-sessions-with-worktrees">Claude Code</a>, <a href="https://cursor.com/docs/configuration/worktrees">Cursor</a>, and <a href="https://developers.openai.com/codex/app/worktrees">Codex</a> already offer native worktree workflows. <a href="https://git-scm.com/docs/git-worktree">Git worktrees</a> work with any coding tool. Add teamroom when independent sessions need to know who else is changing the same files.</p>
+    <div class="comparison-wrap">
+      <table class="comparison">
+        <caption class="comparison-note">What worktree isolation provides, and what a connected teamroom adds</caption>
+        <thead><tr><th scope="col">Capability</th><th scope="col">Worktrees alone</th><th scope="col">With teamroom</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Separate files for parallel agents</th><td>Yes</td><td>Provided by your worktrees</td></tr>
+          <tr><th scope="row">Shared view of uncommitted and untracked file activity</th><td>Not provided by isolation</td><td>Automatic reports</td></tr>
+          <tr><th scope="row">Plans visible before code exists</th><td>Not provided by isolation</td><td>Notes with expected file paths</td></tr>
+          <tr><th scope="row">File overlap warnings across independent tools</th><td>Not provided by isolation</td><td>Hooks and MCP checks</td></tr>
+          <tr><th scope="row">Teammates’ file activity before they push</th><td>Not provided by isolation</td><td>Optional shared server</td></tr>
+          <tr><th scope="row">Understand whether changes actually conflict</th><td>Git detects textual conflicts at merge</td><td>File overlap only; no merge simulation or semantic analysis</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="comparison-note">Native platforms also offer coordination: <a href="https://code.claude.com/docs/en/agent-teams">Claude Code agent teams</a> share tasks and messages, and <a href="https://cursor.com/docs/agent/projects">Cursor Projects</a> coordinate their agents. This table compares worktree isolation. teamroom adds awareness across independent tools and teammates. Sources checked September 28, 2026.</p>
+    <p>One agent, or clearly separate tasks? Worktrees may be enough. Use teamroom when overlapping work is hard to see until integration. Warnings are advisory: same-file edits can be compatible, and different-file changes can still conflict.</p>
+  </div>
+</section>
+
 <section class="block" id="how">
   <div class="wrap">
-    <h2>Three safety nets, trusted differently</h2>
-    <p>Everything teamroom knows arrives through one of three doors. Two run whatever the model does. One works with every agent.</p>
+    <h2>How the room stays informed</h2>
+    <p>Git hooks and background reports share actual changes. Agents can add plans and ask about files before editing. Warning delivery depends on the integration.</p>
 
     <div class="nets">
       <div class="net hook">
         <h3><i class="who alice" aria-hidden="true"></i>Git hooks</h3>
-        <p class="verdict">Always runs. Git calls it.</p>
+        <p class="verdict">Reports after Git events.</p>
         <ul>
           <li>Fires after every commit, checkout, merge and rebase.</li>
           <li>Shares every file this checkout has changed compared with <code>main</code>, including uncommitted and untracked ones.</li>
@@ -268,13 +320,13 @@
         <p class="verdict">Any agent, all session long.</p>
         <ul>
           <li>Shares the checkout's changes every few seconds while the agent works, without being asked.</li>
-          <li>When another session starts changing the same file, the next tool result opens with a heads-up.</li>
+          <li>When another session starts changing the same file, the next teamroom tool result opens with a heads-up.</li>
           <li><code>teamroom_post_note</code> announces a plan, <code>teamroom_check_overlap</code> asks before editing.</li>
         </ul>
       </div>
       <div class="net hook">
         <h3><i class="who alice" aria-hidden="true"></i>Agent hooks</h3>
-        <p class="verdict">Enforced by the agent itself, where it supports hooks (Claude Code, Gemini CLI).</p>
+        <p class="verdict">Pauses an edit once in Claude Code and Gemini CLI.</p>
         <ul>
           <li>A new session is briefed on what the other sessions are changing.</li>
           <li>An edit to a file someone else is in is paused once, with who and why. The retry goes through.</li>
@@ -282,7 +334,7 @@
         </ul>
       </div>
     </div>
-    <p class="pullquote">Hooks are enforced. Tools are a request. The room stays accurate even when an agent ignores its instructions.</p>
+    <p class="pullquote">Reports share what changed. Warnings give agents a chance to adjust.</p>
   </div>
 </section>
 
@@ -352,7 +404,7 @@
       <div>
         <span class="kind">note</span>
         <h3>Plans</h3>
-        <p>What an agent or a person is about to do, like "renaming User to Account", with the files it expects to touch. Other agents are warned before they edit them.</p>
+        <p>What an agent or a person is about to do, like "renaming User to Account", with the files it expects to touch. Hooks and overlap checks can surface the plan before another agent edits them.</p>
       </div>
     </div>
     <div class="never">
@@ -386,7 +438,7 @@ cd ../app-header &amp;&amp; codex   <span class="c"># or claude, gemini, vibe</s
         <h3>Watch them work</h3>
         <pre><code>teamroom watch                <span class="c"># every session, live</span>
 teamroom check src/theme.ts   <span class="c"># who else is in this file</span></code></pre>
-        <p>Agents get their warnings on their own. These are for you.</p>
+        <p>Use the dashboard or check a file yourself. Agents receive warnings through the hooks and MCP checks described above.</p>
       </li>
       <li>
         <h3>Optional: bring in teammates</h3>
@@ -430,7 +482,7 @@ teamroom join '&lt;invite link&gt;'   <span class="c"># on their machines</span>
       ],
     },
     {
-      title: "The risky edit is paused",
+      title: "The overlapping edit is paused",
       text: "Claude reaches for src/theme.ts. A hook that runs before every edit pauses it once, with who is in the file and why. This does not depend on the model remembering to ask.",
       agent: [
         { cls: "tool", text: "▸ Edit src/theme.ts" },
@@ -440,9 +492,9 @@ teamroom join '&lt;invite link&gt;'   <span class="c"># on their machines</span>
     },
     {
       title: "The agent adapts",
-      text: "Instead of editing blind, Claude tells you and keeps to the header. Agents without hooks get the same answer from teamroom_check_overlap, and a heads-up in their next tool result.",
+      text: "In this example, Claude tells you and keeps to the header. It could also retry the edit if the overlap is intentional. Integrations without teamroom hooks rely on overlap checks and the next teamroom tool result.",
       agent: [
-        { cls: "say", text: "Claude: Codex is changing src/theme.ts for the dark palette. I'll put the brand blue in the header only, so the two branches merge cleanly." },
+        { cls: "say", text: "Claude: Codex is changing src/theme.ts for the dark palette. I'll work on the header layout first and leave the shared color change until the theme is ready." },
         { cls: "tool", text: "▸ teamroom_post_note" },
       ],
       room: [
@@ -518,16 +570,16 @@ teamroom join '&lt;invite link&gt;'   <span class="c"># on their machines</span>
       }
     }
 
-    if (!panes.alice.childElementCount) empty(panes.alice, "No agent running yet.");
-    if (!panes.room.childElementCount) empty(panes.room, "No activity yet.");
-    if (!panes.agent.childElementCount) empty(panes.agent, "No agent running yet.");
+    if (!panes.alice.childElementCount) empty(panes.alice, "Task: add a dark palette.\nExpected files: src/theme.ts, src/tokens.css\n\nOwn checkout. Own edits.");
+    if (!panes.room.childElementCount) empty(panes.room, "Both tasks involve src/theme.ts.\n\nStart the walkthrough to see how reports and a warning make that overlap visible.");
+    if (!panes.agent.childElementCount) empty(panes.agent, "Task: update the header's brand color.\nExpected files: src/header.tsx, src/theme.ts\n\nOwn checkout. Same shared theme.");
 
     [...progress.children].forEach((bar, index) => bar.classList.toggle("on", index < stepCount));
     backButton.disabled = stepCount === 0;
 
     if (stepCount === 0) {
-      captionStep.textContent = "Five steps, about a minute";
-      captionText.textContent = "Two agents, two worktrees, one repo. They are about to need the same file.";
+      captionStep.textContent = "Illustrative walkthrough · five steps";
+      captionText.textContent = "Their files are isolated. Their tasks still overlap. Step through how a warning can help them adjust.";
       nextButton.textContent = "Start the replay";
     } else {
       const step = STEPS[stepCount - 1];
