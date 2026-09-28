@@ -1,7 +1,7 @@
 {
   "name": "teamroom",
   "version": "0.1.0",
-  "description": "Run coding agents in parallel without them stepping on each other's files. Works with Claude Code, Codex, Cursor, Gemini CLI, Mistral Vibe and any MCP agent.",
+  "description": "Warn coding agents about overlapping work across worktrees, tools, and teammates.",
   "license": "MIT",
   "author": "Vasiliki Doropoulou",
   "repository": {
