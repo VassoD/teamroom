@@ -64,6 +64,8 @@ Must-haves to be clearly better:
 
 ## 6. Validate with real use
 
+Plan, log template and results: [dogfooding.md](dogfooding.md).
+
 - [ ] Dogfood for a week with 3 parallel agents on a real repo
 - [ ] Log every warning and mark whether it changed a decision (useful / noise)
 - [ ] Use the results to decide priorities: if file warnings are mostly noise, invest in sections 1 and 4
