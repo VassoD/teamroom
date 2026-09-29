@@ -62,7 +62,7 @@ const AGENT_HOOK_STDIN_TIMEOUT_MS = 2_000;
 /** Agents wait for their hooks, so a slow or unreachable server must give up fast. */
 const AGENT_HOOK_NETWORK_TIMEOUT_MS = 1_500;
 
-const HELP = `teamroom: keep parallel coding agents out of each other's files.
+const HELP = `teamroom: warn coding agents about overlapping work across worktrees, tools, and teammates.
 
 Every worktree, clone and agent session shares what it is changing. Before an
 agent edits a file, it learns whether another session is already in it. Works
